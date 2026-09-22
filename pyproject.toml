@@ -21,6 +21,13 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# This repo lives under a cloud-synced directory; uv's default hardlink
+# cache mode can intermittently fail across branch switches here with
+# "cloud operation cannot be performed on a file with incompatible
+# hardlinks" (Windows). Copying avoids that at a small performance cost.
+link-mode = "copy"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/streaming_discovery"]
 
