@@ -213,15 +213,15 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ### Tests for User Story 6 (write first; must fail before implementation)
 
-- [ ] T067 [P] [US6] E2E test: a guided-intake session with format/mood answered and providers/exclusions skipped shows only the answered fields at confirmation, and a user correction at that step is reflected in the `PreferenceProfile` used for discovery, in `tests/e2e/test_guided_intake.py` (spec.md US6 Acceptance Scenarios 1–2)
+- [x] T067 [P] [US6] E2E test: a guided-intake session with format/mood answered and providers/exclusions skipped shows only the answered fields at confirmation, and a user correction at that step is reflected in the `PreferenceProfile` used for discovery, in `tests/e2e/test_guided_intake.py` (spec.md US6 Acceptance Scenarios 1–2)
 
 ### Implementation for User Story 6
 
-- [ ] T068 [US6] Implement the guided-intake CLI prompts (format, services, mood/interests, exclusions, optional constraints — the six-step sequence in spec.md's Assumptions) in `src/streaming_discovery/cli/intake.py` (FR-002)
-- [ ] T069 [US6] Wire guided-intake answers into the `PreferenceAgent` input alongside/instead of free text, reusing the confirmation/correction step T045 already made interactive (no new interactivity to build here — only the guided-intake-specific prompts feeding into it), in `src/streaming_discovery/cli/intake.py` and `src/streaming_discovery/agents/orchestrator.py` (depends on T045, T068)
-- [ ] T070 [US6] Implement conflicting-input surfacing at the confirmation step (e.g., free text says "movie," guided intake says "TV") per spec.md Edge Cases, in `src/streaming_discovery/agents/orchestrator.py`
+- [x] T068 [US6] Implement the guided-intake CLI prompts (format, services, mood/interests, exclusions, optional constraints — the five-question sequence in spec.md's Assumptions; step 6, confirmation, reuses `default_confirm`) in `src/streaming_discovery/cli/intake.py` (FR-002)
+- [x] T069 [US6] Wire guided-intake answers into the `PreferenceAgent` input alongside/instead of free text, reusing the confirmation/correction step T045 already made interactive (no new interactivity to build here — only the guided-intake-specific prompts feeding into it), in `src/streaming_discovery/cli/intake.py` (depends on T045, T068). `run_guided_cli` unifies an optional leading free-text prompt with the five guided questions in one flow (rather than two separate, mutually-exclusive entry points), since a free-text/intake conflict (T070) can't arise if the two paths never coexist in the same session.
+- [x] T070 [US6] Implement conflicting-input surfacing at the confirmation step (e.g., free text says "movie," guided intake says "TV") per spec.md Edge Cases, in `src/streaming_discovery/cli/intake.py` (`_detect_format_conflict`, unit-tested directly in `tests/unit/test_intake_conflict_detection.py`) — a narrow, literal check for the specific case the spec names, not a general-purpose contradiction detector, printed before the user reaches confirmation so they can resolve it there.
 
-**Checkpoint**: All six user stories independently functional.
+**Checkpoint**: All six user stories independently functional. Verified: 106 tests passing, `ruff check`/`ruff format --check` clean.
 
 ---
 
