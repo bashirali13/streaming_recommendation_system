@@ -8,6 +8,16 @@
 
 **Input**: User description: "Create the initial baseline specification for the Multi-Agent Streaming Discovery Assistant, based on the project outline at multi_agent_streaming_discovery_project_outline.md. A terminal-based streaming discovery assistant that helps a user choose a movie or TV show from vague moods, specific constraints, or a mix of both, using a multi-agent architecture (Orchestrator, Preference Agent, Discovery Agent, Recommendation Agent) communicating via validated Pydantic JSON contracts, with TMDB as the sole external data source. Returns exactly three recommendation roles (Best Match, Safe Pick, Wildcard Pick), supports one bounded zero-result retry with deterministic soft-constraint relaxation, never silently relaxes hard constraints/exclusions, never shows raw TMDB JSON to the user, and holds session state in memory only. Scoped as the MVP slice: guided-but-optional terminal intake; movie/TV/either; provider/mood/exclusion/constraint capture; PreferenceProfile -> CandidatePool -> RecommendationPackage pipeline; one retry policy; fixture-backed deterministic demo mode."
 
+## Clarifications
+
+### Session 2026-09-22
+
+- **Q1: What happens when only 1–2 qualifying candidates exist (not zero, not enough for all three roles)?** → **A: Return fewer than three roles.** Valid matches already exist; the system does not broaden constraints or accept lower-quality/duplicate matches merely to fill an empty role. Recommendation quality takes priority over slot-filling.
+- **Q2: How is the watch-provider region determined?** → **C: A configuration value (e.g., `REGION=US`) with a hardcoded fallback, never asked of the user.** Keeps guided intake simple, keeps testing simple, and keeps the region trivially changeable for future expansion without touching the conversation flow.
+- **Q3: What happens when a language-model call fails outright (not just malformed output)?** → **B: Retry the model call itself 1–2 times before failing.** Transient provider failures are expected and retrying keeps orchestration realistic; if retries are exhausted, the system returns a controlled error rather than falling back to a deterministic degraded interpretation for the MVP.
+
+A follow-up architecture and domain-model review (contract design, agent boundaries, orchestration flow, retry behavior, and TMDB-payload minimization) was performed after these decisions and is reflected throughout this spec — see the **Domain Model Minimization Rationale** section below for the field-by-field justification behind each internal contract.
+
 ## Problem Statement
 
 People often know they want to watch *something* tonight but cannot translate that feeling into a search query a streaming service or search engine understands. Existing platform search requires either an exact title or rigid filter selection, and it does not handle vague mood-based requests ("something dark and moody"), multi-constraint requests ("Netflix or Hulu, after 2010, powerful female lead, not superhero"), or similarity requests ("something like Arrival and Severance") in a single interaction. Users are left either browsing endlessly or receiving oversized, undifferentiated result lists that create decision fatigue rather than resolving it.
@@ -153,7 +163,7 @@ A user has no clear idea what they want and asks to be guided (e.g., "I do not k
 ### Edge Cases
 
 - What happens when the user's request conflicts internally (e.g., asks to exclude a genre while also naming a liked title that belongs to that genre)? The system must surface this rather than silently resolving it in one direction.
-- What happens when the initial (non-retried) search already returns fewer than three candidates but more than zero? See Q1 below — this determines whether the system returns fewer than three roles, reuses candidates, or treats this the same as a zero-result case.
+- What happens when the initial (non-retried) search, or the one allowed retry, yields 1–2 qualifying candidates but not enough for all three roles? Per the resolved clarification above, the system returns only as many roles as there are distinct qualifying candidates (see FR-015) rather than broadening constraints or duplicating a pick to fill an empty slot.
 - What happens when TMDB returns malformed, incomplete, or unexpectedly-shaped data for a candidate needed to satisfy a hard constraint (e.g., missing runtime when a runtime cap is a hard constraint)? The system must exclude or flag that candidate rather than guess.
 - What happens when a candidate's TMDB overview text contains content resembling an instruction to the assistant (prompt-injection style content)? The system must treat all TMDB text fields as inert data, never as instructions.
 - What happens when two or more top-ranked candidates are near-duplicates (e.g., a title and its direct sequel, or the same title differing only by region cut)? The system must not present near-duplicates as two of the three distinct picks.
@@ -178,12 +188,12 @@ A user has no clear idea what they want and asks to be guided (e.g., "I do not k
 - **FR-012**: If the retried search also yields zero qualifying candidates, the system MUST stop without further retries and MUST explain to the user which constraints could not be satisfied.
 - **FR-013**: Whenever a soft constraint was relaxed to produce results, the system MUST disclose the relaxed constraint in the final output shown to the user.
 - **FR-014**: The system MUST rank qualifying candidates by fit to the user's soft preferences after hard filtering.
-- **FR-015**: The system MUST select at most three recommendations from the ranked candidates, assigned to three distinct roles — Best Match, Safe Pick, and Wildcard Pick — and MUST NOT present more than these three as primary recommendations. [NEEDS CLARIFICATION — see Q1]
+- **FR-015**: The system MUST select at most three recommendations from the ranked candidates, assigned to three distinct roles — Best Match, Safe Pick, and Wildcard Pick — filled in that priority order (Best Match requires ≥1 qualifying candidate, Safe Pick requires ≥2, Wildcard Pick requires ≥3) — and MUST NOT present more than these three as primary recommendations. When fewer than three distinct, non-duplicate qualifying candidates exist after hard filtering and the one allowed retry, the system MUST return only as many roles as candidates support rather than broadening constraints, reusing a candidate across roles, or accepting a lower-quality/duplicate match solely to fill an empty role. *(Resolved 2026-09-22, see Clarifications: Q1.)*
 - **FR-016**: The system MUST NOT assign duplicate or near-identical titles (e.g., the same title, or a direct sequel/prequel/alternate-cut of an already-selected title) to more than one of the three roles.
 - **FR-017**: Each recommended title MUST be accompanied by a concise, human-readable rationale describing its key matching and mismatching factors relative to the user's stated preferences.
 - **FR-018**: The system MUST reduce and visibly communicate lower confidence for a recommendation when the evidence for a subjective trait (tone, "vibe") is weak, ambiguous, or unsupported by the candidate's available metadata.
-- **FR-019**: The system MUST include available watch-provider information for each recommended title when TMDB supplies it for the configured provider region, and MUST NOT present that provider information as a guarantee of current, live subscription availability.
-- **FR-020**: The system MUST determine the provider region used for watch-provider lookups. [NEEDS CLARIFICATION — see Q2]
+- **FR-019**: The system MUST include, for each recommended title, only subscription-style ("flatrate") watch-provider names available in the configured provider region when TMDB supplies them, MUST exclude rent/buy provider offers and all other regions' data from both processing and display, and MUST NOT present provider information as a guarantee of current, live subscription availability.
+- **FR-020**: The system MUST determine the watch-provider region from a single configuration value (e.g., a `REGION` setting) with a hardcoded fallback default, and MUST NOT prompt the user to select a region during intake. *(Resolved 2026-09-22, see Clarifications: Q2.)*
 - **FR-021**: The system MUST NOT display raw TMDB JSON payloads or raw inter-agent JSON contracts directly to the end user at any point in the conversation.
 - **FR-022**: Every handoff between agents (Orchestrator, Preference Agent, Discovery Agent, Recommendation Agent) MUST be validated against an explicit, typed contract; a handoff that fails validation MUST be treated as a controlled failure, not silently coerced or ignored.
 - **FR-023**: The system MUST hold all session state (intake answers, interpreted preferences, discovery results, final recommendations) in memory for the duration of the session only, with no persistent storage between sessions.
@@ -191,7 +201,9 @@ A user has no clear idea what they want and asks to be guided (e.g., "I do not k
 - **FR-025**: The system MUST provide a fixture-backed demo mode that exercises the full Orchestrator → Preference Agent → Discovery Agent → Recommendation Agent pipeline, including the zero-result retry path and the no-match stop path, without requiring live TMDB or language-model credentials.
 - **FR-026**: The system MUST treat all text originating from TMDB candidate data (titles, overviews, etc.) as inert data rather than as instructions, regardless of its content.
 - **FR-027**: The system MUST respond in a controlled, user-visible manner (not a crash or indefinite hang) when TMDB is unreachable, times out, or returns an error, and MUST NOT fabricate candidate data to compensate.
-- **FR-028**: When an underlying language-model call needed for preference interpretation or rationale generation fails outright (e.g., provider outage, timeout) rather than returning schema-invalid output, the system MUST respond in a defined, controlled way. [NEEDS CLARIFICATION — see Q3]
+- **FR-028**: When a language-model call made by the Preference Agent (interpretation) or the Recommendation Agent (scoring/rationale) fails outright — timeout, provider outage, or rate limit — rather than returning schema-invalid output, the system MUST retry that model call up to a small bounded number of times (1–2 additional attempts). If all attempts are exhausted, the system MUST stop and return a controlled, user-visible error rather than falling back to a deterministic/non-LLM degraded interpretation. This retry is independent of, and does not count against, the one discovery retry governed by FR-011. *(Resolved 2026-09-22, see Clarifications: Q3.)*
+- **FR-029**: The Discovery Agent MUST fetch detail-level TMDB data that is not present in bulk search/discover results — TV runtime, watch-provider lists, and thematic keywords — only for candidates that have survived hard filtering and are being considered for final ranking/selection, and MUST NOT fetch this detail-level data for the full raw candidate pool. Hard and soft filters that TMDB can apply server-side (genre, year range, provider, and movie runtime) MUST be expressed in the discovery query itself rather than fetched and filtered client-side.
+- **FR-030**: Every field on an internal contract (PreferenceProfile, DiscoveryQuery, CandidateMedia, CandidatePool, RecommendationPackage) MUST have at least one identified downstream consumer (an agent or the final user-facing output) and MUST map to a stated requirement or acceptance criterion; internal contracts MUST NOT mirror TMDB's raw response shape, and a field with no identified consumer MUST be removed rather than carried "for completeness."
 
 ### Non-Functional Requirements
 
@@ -202,15 +214,54 @@ A user has no clear idea what they want and asks to be guided (e.g., "I do not k
 - **NFR-005 (Concise, bounded output)**: User-facing output MUST remain concise (three roles with short rationales), never devolving into a long list or a raw data dump, regardless of how many candidates were found.
 - **NFR-006 (Observability)**: The system MUST produce structured logs of agent invocations, TMDB calls, retries, contract-validation failures, latency, and (where applicable) language-model token usage, sufficient to reconstruct what happened in a given session without exposing that raw log detail to the end user by default.
 - **NFR-007 (Bounded retry cost)**: The zero-result retry policy MUST be bounded to exactly one additional discovery attempt per user request, so a single request can never trigger unbounded TMDB call volume.
+- **NFR-008 (LLM usage boundary)**: Language-model calls are confined to the Preference Agent (interpreting ambiguous user input) and the Recommendation Agent (soft-preference scoring and rationale generation). The Orchestrator and Discovery Agent MUST be implementable as fully deterministic components with no language-model dependency, consistent with the project's principle of using deterministic code for invariants and the LLM only for ambiguous interpretation and rationale.
 
 ### Key Entities
 
+> Field lists below are intentionally minimal: every field has an identified downstream consumer and a requirement it supports (FR-030). See **Domain Model Minimization Rationale** for the full field-by-field audit, including fields considered and deliberately excluded.
+
 - **UserSessionState**: Represents one in-memory conversation session — raw user input, guided-intake answers, the confirmed preference profile, discovery/retry history, and the final recommendation package, held only for the session's lifetime.
-- **PreferenceProfile**: The structured, validated representation of what the user wants — format, providers, genres and excluded genres, tones/settings/themes, languages, release-year and runtime bounds, liked/disliked titles, and an explicit separation of hard constraints from soft preferences.
-- **DiscoveryQuery**: The structured request the Orchestrator hands to the Discovery Agent describing how to query TMDB for one discovery attempt — including which constraint (if any) has been relaxed for a retry, and which retry number this is.
-- **CandidateMedia**: A single normalized movie or TV title as returned by TMDB and shaped for downstream use — identifier, media type, title, overview, genres, release information, rating/popularity signals, language, runtime (when retrieved), and available provider metadata.
-- **CandidatePool**: The bounded set of CandidateMedia produced by one discovery attempt, along with metadata about the query that produced it, whether a retry is required, and any errors encountered.
-- **RecommendationPackage**: The final output — Best Match, Safe Pick, and Wildcard Pick (each a CandidateMedia plus rationale), the constraints that were applied, any constraint that was relaxed, and any unresolved notes explaining a partial or no-match outcome.
+- **PreferenceProfile**: The structured, validated representation of what the user wants — media type, providers, genres and excluded genres, tone/setting/theme descriptors, languages, release-year and runtime bounds, liked/disliked titles, and an explicit separation of hard constraints from soft preferences.
+- **DiscoveryQuery**: The concrete, TMDB-queryable request the Orchestrator derives from a PreferenceProfile for one discovery attempt — media type, provider names, configured region, included/excluded genres, year range, runtime bound (where the target media type supports server-side filtering), language, similarity-seed titles, which single constraint (if any) is relaxed for this attempt, and the retry number. It deliberately excludes subjective/free-text fields (tone, theme, setting) — those never cross into a TMDB-shaped query, only into the Recommendation Agent's scoring step.
+- **CandidateMedia**: A single normalized movie or TV title, shaped only around fields with a named downstream consumer — identifier, media type, title, overview, resolved genre names, release year, rating, and (for the pool) no visual, financial, or TMDB-internal-id fields. Runtime, provider names (flatrate-only, configured region only), and thematic keywords are enrichment fields populated only for candidates that reach ranking (FR-029), not for the full raw pool.
+- **CandidatePool**: The bounded set of CandidateMedia produced by one discovery attempt, together with which constraint (if any) was relaxed to produce it, the retry number, and any TMDB error encountered. It does not carry a retry-decision flag or TMDB's raw total-result count — the Orchestrator alone decides whether a retry is warranted, from the candidate count it actually receives.
+- **RecommendationPackage**: The final output — Best Match, and (only when enough distinct qualifying candidates exist) Safe Pick and Wildcard Pick, each a CandidateMedia plus a written rationale — the constraints that were applied, at most one relaxed constraint, and any unresolved notes explaining a partial or no-match outcome.
+
+### Domain Model Minimization Rationale
+
+This audit resolves the "review the TMDB fixture and justify every field" clarification: for every field kept on an internal contract, its consuming agent and the requirement it supports are named; fields with no identified consumer were removed rather than carried for completeness (FR-030).
+
+**CandidateMedia** — kept fields:
+
+| Field | Consumer | Requirement/AC |
+|---|---|---|
+| `tmdb_id` | Recommendation Agent, Orchestrator | Duplicate detection (FR-016), session export (FR-024) |
+| `media_type` | Recommendation Agent | Hard-filter enforcement (FR-005, FR-009) |
+| `title` | Final user-facing output | FR-017, FR-021 |
+| `overview` | Recommendation Agent | Rationale generation, tone-fit evidence (FR-017, FR-018); always treated as inert text, never as instructions (FR-026) |
+| `genres` (resolved names, not raw TMDB genre ids) | Recommendation Agent | Exclusion enforcement (FR-009, FR-010), soft genre fit (FR-014) |
+| `release_year` (year only, not full date) | Discovery Agent (query construction), Recommendation Agent (display) | Year-range constraint and its relaxation (FR-011) |
+| `vote_average` | Recommendation Agent | Ranking signal and near-duplicate tie-break (see Assumptions) |
+| `runtime_minutes` (Optional; finalist-enrichment only) | Recommendation Agent | Runtime constraint and its relaxation (FR-011); fetched only per FR-029 |
+| `provider_names` (Optional; flatrate-only, configured region only) | Recommendation Agent, final output | FR-019 |
+| `thematic_keywords` (Optional; finalist-enrichment only) | Recommendation Agent | Tone/theme rationale quality for vague and similarity requests (User Story 2/3, FR-017, FR-018) |
+
+**CandidateMedia** — fields considered and explicitly excluded:
+
+| Field | Why excluded |
+|---|---|
+| `genre_ids` (raw TMDB ids) | Superseded by resolved `genres`; ids are translated once in the adapter and never need to travel downstream |
+| `popularity` | No requirement reads a "trending" signal distinct from `vote_average` |
+| `vote_count` | Would only matter for a rating-confidence weighting not specified by any current requirement |
+| `language` (per-candidate) | The language filter is applied at query time from `PreferenceProfile.languages`; no requirement displays it back per candidate |
+| `poster_path`, `backdrop_path` | Terminal-only interface — no requirement renders an image |
+| `adult`, `video`, `original_title`, `belongs_to_collection`, `production_companies`, `budget`, `revenue`, `homepage`, `imdb_id`, `tagline`, `status` | No consumer in any stated requirement |
+| `source_status` (per-candidate) | Redundant with `CandidatePool`'s own retry/relaxation metadata, which already records which attempt produced a pool |
+| rent/buy provider offers, non-configured-region provider data | No requirement consumes them; excluded at the adapter boundary, not merely hidden in the UI (FR-019) |
+
+**CandidatePool** — excluded: `total_results` (TMDB's raw unfiltered count has no consumer; the retry decision uses our own filtered candidate count) and `retry_required` (the Orchestrator, not the Discovery Agent, owns the retry decision per the project's agent-responsibility boundaries).
+
+**RecommendationPackage** — `relaxed_constraints` (plural) narrowed to a single optional `relaxed_constraint`, matching the one-relaxation cap in FR-011; the three role fields are optional beyond Best Match, per FR-015.
 
 ## Success Criteria *(mandatory)*
 
@@ -223,6 +274,7 @@ A user has no clear idea what they want and asks to be guided (e.g., "I do not k
 - **SC-005**: When the initial search yields zero qualifying candidates, the system performs exactly one retry and, whether or not that retry succeeds, always communicates a clear outcome (relaxed-constraint disclosure, or a no-match explanation naming the blocking constraints) — never an unexplained empty result.
 - **SC-006**: A full demonstration run (guided intake through final recommendation, including one retry scenario) can be completed using only fixture data, with no live TMDB or language-model credentials required.
 - **SC-007**: Every documented user journey (vague mood, specific constraints, similarity, runtime-bounded, exclusion-based, guided/open discovery) has at least one passing automated test demonstrating it end-to-end before that journey is considered complete.
+- **SC-008**: When only 1 or 2 distinct, non-duplicate qualifying candidates exist (after hard filtering and the one allowed retry), 100% of such sessions return that smaller number of roles rather than broadening a constraint, reusing a candidate, or accepting a duplicate solely to reach three.
 
 ## Acceptance Criteria / Definition of Done
 
@@ -249,7 +301,7 @@ Drawn from the project outline's acceptance-criteria themes and definition of do
 - A fixture-backed demo can run the full pipeline with no API or model credentials.
 - Each agent's responsibilities and explicit non-responsibilities (per the project outline's architecture section) are reflected in this spec's functional requirements and are not contradicted by them.
 - Output shown to the user is concise, contains no raw JSON, and always identifies any relaxed constraint.
-- All three [NEEDS CLARIFICATION] questions below are resolved (or explicitly deferred with a documented owner/decision date) before `/speckit-plan` is run.
+- Every internal contract field has a named consumer and a supporting requirement, per FR-030 and the Domain Model Minimization Rationale.
 
 ## Assumptions
 
@@ -259,62 +311,5 @@ Drawn from the project outline's acceptance-criteria themes and definition of do
 - **Session export trigger and format**: Export is user-initiated at the end of a session (not automatic), and both JSON and Markdown are acceptable output formats per the source outline; the user chooses the format at export time.
 - **Language/runtime scope**: The system only needs to support English-language interaction and TMDB's English-locale metadata for the MVP; other locales are not excluded by design but are not required to be tested for this spec.
 - **Single-user, single-session scope**: The system serves one user in one terminal session at a time; concurrent multi-user session handling is out of scope for this specification.
-
-## Open Questions Requiring Clarification
-
-The following three questions are the highest-impact ambiguities identified in the source outline and are blocking for planning. They are also embedded inline above as `[NEEDS CLARIFICATION]` markers.
-
-### Q1: Minimum qualifying-candidate threshold for the three-role guarantee
-
-**Context**: FR-015 states the system selects at most three roles "when enough candidates exist," and the outline says three roles are guaranteed "when enough candidates exist" but does not define what happens when the initial search (or the one allowed retry) yields 1 or 2 qualifying, non-duplicate candidates — a non-zero but insufficient count.
-
-**What we need to know**: Should a 1–2 candidate result (after hard filtering and de-duplication) be treated as (a) a partial success returning fewer than three roles, (b) treated the same as a zero-result case and trigger the one allowed retry, or (c) treated as a no-match/insufficient-result outcome with an explanation, even though it is technically non-zero?
-
-**Suggested Answers**:
-
-| Option | Answer | Implications |
-|--------|--------|--------------|
-| A | Return fewer than three roles (e.g., just Best Match, or Best Match + Safe Pick) when only 1–2 qualify | Simple, but weakens the "always three distinct picks" value proposition and needs its own acceptance criteria for degraded output |
-| B | Treat 1–2 candidates the same as zero for retry purposes — the retry policy fires to try to reach three | Keeps the "three roles" promise stronger, but blurs the "zero-result retry" trigger definition (retry becomes "insufficient-result retry") |
-| C | Treat 1–2 candidates as a no-match outcome with an explanation, same messaging shape as the zero-candidate stop case | Simplifies logic (only two outcomes: 3-role success or explained non-success) but discards usable near-misses |
-| Custom | Provide your own rule | — |
-
-**Your choice**: _[Wait for user response]_
-
----
-
-### Q2: Provider/region configuration mechanism
-
-**Context**: FR-019/FR-020 and the outline's TMDB Integration section both reference "a configured region" for watch-provider lookups, but the outline never states whether that region is a fixed system default, an intake-time user selection, or a pre-session configuration value (e.g., an environment/config setting).
-
-**What we need to know**: How is the watch-provider region determined for a given session?
-
-**Suggested Answers**:
-
-| Option | Answer | Implications |
-|--------|--------|--------------|
-| A | Fixed default (e.g., "US") baked into configuration for the MVP, not user-facing | Simplest; no new intake step; matches "one configured region" language in the outline most literally |
-| B | User selects region during guided intake (new intake field) | More correct for non-US users, but adds an intake step and a new PreferenceProfile field not currently listed in the outline's field set |
-| C | Read from an environment/config value at startup, with a hardcoded fallback default, but never asked of the user | Balances flexibility (deployer can change it) with a simple user experience |
-| Custom | Provide your own rule | — |
-
-**Your choice**: _[Wait for user response]_
-
----
-
-### Q3: Behavior when an underlying language-model call fails outright
-
-**Context**: The outline states "LLM outputs are schema-validated" and that malformed LLM output produces a controlled failure, but it does not address the distinct case where the model call itself fails to return anything (timeout, provider outage, rate limit) — a failure mode separate from "the model responded but the output didn't validate."
-
-**What we need to know**: When a language-model call needed for preference interpretation or rationale generation fails to complete at all, should the system (a) abort the whole request with a clear error message, (b) retry the model call itself a bounded number of times before aborting, or (c) fall back to a deterministic/non-LLM degraded path (e.g., treat the entire input as an unparsed soft preference) rather than aborting?
-
-**Suggested Answers**:
-
-| Option | Answer | Implications |
-|--------|--------|--------------|
-| A | Abort immediately with a controlled, user-visible error; no automatic retry of the model call | Simplest and most predictable; consistent with "one bounded retry" philosophy already used for discovery, but a transient provider blip fails the whole session |
-| B | Retry the model call itself up to a small bounded number of times (e.g., 1–2) before aborting | Improves resilience to transient provider issues, but introduces a second, separate retry concept alongside the discovery retry that needs its own acceptance criteria |
-| C | Fall back to a deterministic degraded interpretation (e.g., minimal keyword extraction) rather than aborting | Keeps the session alive, but risks a lower-quality PreferenceProfile that the user did not explicitly approve, and adds meaningful implementation complexity for the MVP |
-| Custom | Provide your own rule | — |
-
-**Your choice**: _[Wait for user response]_
+- **Provider offer type**: Only subscription-style ("flatrate") watch-provider offers are modeled; rent/buy offers are excluded entirely at the adapter boundary since no requirement consumes them (see Domain Model Minimization Rationale).
+- **Genre and date normalization**: Genre identifiers are resolved to human-readable names once, in the TMDB adapter, from TMDB's static genre list; raw genre ids and full release dates (as opposed to release year) are not carried into any internal contract, since no requirement needs day/month precision or raw ids.

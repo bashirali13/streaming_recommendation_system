@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain — 3 markers pending user response (Q1, Q2, Q3 in spec.md)
+- [x] No [NEEDS CLARIFICATION] markers remain — Q1, Q2, Q3 resolved 2026-09-22 (see spec.md Clarifications section)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,6 +31,7 @@
 
 ## Notes
 
-- Three [NEEDS CLARIFICATION] markers remain (FR-015, FR-020, FR-028), surfaced as Q1–Q3 in `spec.md`'s "Open Questions Requiring Clarification" section. Per the max-3 clarification limit, these were prioritized by scope/UX impact over the many lower-impact ambiguities noted in the source outline (exact scoring formula, exact confidence-score representation, tie-breaking mechanics, export trigger details), which were instead resolved with documented defaults in the Assumptions section.
-- This checklist item block is otherwise fully passing; update the first Requirement Completeness item to checked once Q1–Q3 are answered and the spec is amended.
-- Deeper cross-cutting clarification (beyond these 3) can be run via `/speckit-clarify` after Q1–Q3 are resolved, before `/speckit-plan`.
+- Q1–Q3 (candidate-count threshold, provider-region configuration, LLM-call-failure retry) were resolved 2026-09-22 and are recorded in `spec.md`'s Clarifications section, with FR-015, FR-020, and FR-028 updated accordingly.
+- A follow-up architecture and domain-model review was performed the same session, adding FR-029 (finalist-only detail enrichment), FR-030 (every contract field must have a named consumer), and NFR-008 (LLM usage boundary), and rewriting the Key Entities and a new Domain Model Minimization Rationale section to remove all TMDB-mirrored fields without a downstream consumer.
+- All checklist items now pass. Remaining lower-impact ambiguities from the source outline (exact scoring formula, numeric confidence thresholds, export trigger mechanics) remain resolved via documented defaults in the Assumptions section rather than blocking markers.
+- Ready for `/speckit-plan`.
