@@ -81,6 +81,21 @@ class DiscoveryAgent:
             # confirm no excluded genre slipped through (FR-010).
             if set(candidate.genres) & set(query.excluded_genres):
                 continue
+            # TV season-count hard filter (User Story 5): TMDB has no
+            # server-side season-count query parameter, so this can only
+            # be evaluated after the details() call above -- which every
+            # survivor already gets, so no extra fetch is needed beyond
+            # what FR-029's finalist-only enrichment already does for
+            # this candidate (contracts/discovery-agent.md's hard-filter
+            # exception). A stated season_count_max is always hard
+            # (data-model.md), so an over-the-cap candidate is excluded
+            # outright, never merely ranked lower.
+            if (
+                query.season_count_max is not None
+                and candidate.season_count is not None
+                and candidate.season_count > query.season_count_max
+            ):
+                continue
             candidates.append(candidate)
 
         return CandidatePool(
