@@ -29,6 +29,12 @@ Each walkthrough corresponds to one user story in `spec.md` and should be runnab
 - **Fixture set**: a candidate pool fixture with more than three qualifying titles after excluding the superhero genre.
 - **Expected outcome**: three distinct roles returned (Best Match/Safe Pick/Wildcard Pick), no superhero-genre title present, no raw JSON visible, each pick has a short rationale.
 
+### 1b. Partial-fill request — fewer than three qualifying candidates (User Story 1, P1)
+
+- **Input**: same shape as scenario 1.
+- **Fixture set**: a candidate pool fixture with exactly 1, and separately exactly 2, qualifying titles after hard filtering (two fixture variants).
+- **Expected outcome**: with 1 qualifying candidate, only `best_match` is populated (`safe_pick`/`wildcard_pick` are `None`); with 2, `best_match` and `safe_pick` are populated and `wildcard_pick` is `None`. No constraint is broadened and no candidate is duplicated or reused across roles to force a third pick (spec.md Clarifications Q1, FR-015, SC-008).
+
 ### 2. Vague mood request (User Story 2, P1)
 
 - **Input**: "Dark, moody, Eastern European vibes."
@@ -76,4 +82,4 @@ Each walkthrough corresponds to one user story in `spec.md` and should be runnab
 
 ## What "done" looks like for this quickstart
 
-Every scenario above has a corresponding automated test (contributing to SC-007) and can also be run as a live, watchable demo session using the same fixture data — satisfying FR-025 as a demonstrable capability, not only a test-suite property.
+Every one of the 10 scenarios above (1, 1b, 2, 3, 4, 4b, 5, 6, 7, 8) has a corresponding automated test (contributing to SC-007) and can also be run as a live, watchable demo session using the same fixture data — satisfying FR-025 as a demonstrable capability, not only a test-suite property.

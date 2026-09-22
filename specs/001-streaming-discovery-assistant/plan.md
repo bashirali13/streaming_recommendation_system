@@ -34,9 +34,19 @@ A terminal-based assistant that turns a vague or specific natural-language reque
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-`.specify/memory/constitution.md` is still the unfilled scaffold template (no ratified project principles exist yet) — there are no gates to evaluate this plan against, so this gate is **N/A, not passing-by-default**. The spec and this plan already assume several principles the project outline treats as non-negotiable (deterministic code owns invariants while the LLM only interprets/rationalizes — NFR-008; test-first development; contract validation at every handoff — NFR-002); ratifying these via `/speckit-constitution` before or during `/speckit-implement` is recommended so future features are checked against them explicitly, but it does not block this plan.
+**Re-evaluated 2026-09-22 against constitution v1.0.0** (ratified after this plan's original draft; this section was stale until this pass — see the `001-streaming-discovery-assistant` process log for that finding). Checked against all 7 principles:
 
-*Post-Phase-1 re-check*: unchanged — no constitution exists to re-evaluate against. No design decision in `research.md` or `data-model.md` introduces a violation of the outline's stated principles (simplicity, deterministic invariants, no unjustified agents/contracts — see spec's Domain Model Minimization Rationale for the affirmative minimization work already done at the spec stage).
+| Principle | Status | Basis |
+|---|---|---|
+| I. Spec-Driven and Test-First | ✅ Pass | `tasks.md` orders a failing test before every implementation task |
+| II. Deterministic Core, LLM at the Edges | ✅ Pass | NFR-008; only Preference/Recommendation agents hold a `ModelProvider` dependency |
+| III. Typed Contracts at Every Boundary | ✅ Pass | data-model.md's six contracts, all consumer-justified per FR-030 |
+| IV. Hard Constraints Never Silently Relaxed | ✅ Pass | FR-010; `DiscoveryQuery` validation rule holds `excluded_genres`/`media_type`/hard-override fields identical across retry attempts |
+| V. Bounded, Disclosed Retries Only | ✅ Pass | FR-011/FR-028; both retry mechanisms capped and independent |
+| VI. Intentional Simplicity | ✅ Pass | spec.md's Domain Model Minimization Rationale; no agent/contract beyond the four/six already justified |
+| VII. No Fabrication, No Raw Data Leakage | ✅ Pass | FR-008, FR-021, FR-026 |
+
+No violation found; **Complexity Tracking below remains empty.**
 
 ## Project Structure
 
@@ -94,4 +104,4 @@ tests/
 
 ## Complexity Tracking
 
-*No entries — the Constitution Check found no gate to violate, and the spec's own Domain Model Minimization Rationale already removed every contract/field/agent identified as unnecessary during review. No additional complexity beyond the four agents and six contracts already justified in `spec.md` is introduced by this plan.*
+*No entries — the Constitution Check (v1.0.0, re-evaluated above) found no violation, and the spec's own Domain Model Minimization Rationale already removed every contract/field/agent identified as unnecessary during review. No additional complexity beyond the four agents and six contracts already justified in `spec.md` is introduced by this plan.*

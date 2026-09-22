@@ -30,7 +30,7 @@ Produced by the Preference Agent (FR-004); consumed by the Orchestrator (to buil
 | `liked_titles` | `list[str]` | Drives similarity-based discovery (User Story 3) |
 | `disliked_titles` | `list[str]` | Soft negative signal for the Recommendation Agent; exact matches also excluded by the Discovery Agent at pool assembly |
 | `additional_notes` | `str \| None` | Free-form, unparsed remainder; soft, consumed only by the Recommendation Agent's rationale step |
-| `hard_override_fields` | `list[str]` | Names of otherwise-soft fields (`runtime_max_minutes`, `year_min`/`year_max`, `providers`) the user explicitly marked non-negotiable ("it MUST be...", per the outline's "user-designated hard constraints"). Fields not listed here keep their default hard/soft classification; `media_type` and `excluded_genres` are always hard and never appear here |
+| `hard_override_fields` | `list[str]` | Usually populated by user choice: names of otherwise-soft fields (`runtime_max_minutes`, `year_min`/`year_max`, `providers`) the user explicitly marked non-negotiable ("it MUST be...", per the outline's "user-designated hard constraints"). One field enters this list automatically rather than by user choice: `season_count_max` is always added here whenever it is set at all (see its own row below) — a stated season cap has no soft form. Fields not listed here keep their default hard/soft classification; `media_type` and `excluded_genres` are always hard and never appear here |
 
 **Validation rules**: at least one of `media_type`, `providers`, `genres`, `tone_descriptors`, `setting_descriptors`, `theme_descriptors`, `liked_titles` must be non-empty/non-null (an entirely empty profile cannot proceed to discovery — this is the "blocking clarification" case the Preference Agent's non-responsibility list still requires the Orchestrator to detect). `year_min <= year_max` when both are set.
 
@@ -87,6 +87,8 @@ Produced by one Discovery Agent invocation; consumed by the Orchestrator (retry 
 | `error` | `TmdbErrorInfo \| None` | Set only on a genuine TMDB failure (timeout/HTTP error/malformed response), never on a legitimate empty result — this is what lets the Orchestrator distinguish "TMDB is down" from "no matches" (FR-027) |
 
 No `total_results` field (TMDB's raw unfiltered count has no consumer) and no `retry_required` field (the Orchestrator computes the retry decision itself from `len(candidates)` — see `contracts/orchestrator.md`).
+
+**`TmdbErrorInfo`** (nested type): `{ kind: Literal["timeout", "http_error", "malformed_response"], detail: str }`. `detail` is a short, developer-facing description (e.g., the HTTP status code or the validation failure) — it is never shown to the user directly; the Orchestrator turns it into the controlled, user-facing message (FR-027).
 
 ## RecommendationPackage
 
