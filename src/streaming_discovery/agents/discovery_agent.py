@@ -46,17 +46,20 @@ class DiscoveryAgent:
 
     async def run(self, query: DiscoveryQuery) -> CandidatePool:
         try:
-            raw_items = await self._tmdb.discover(
-                media_type=query.media_type,
-                region=query.region,
-                provider_names=query.provider_names,
-                included_genres=query.included_genres,
-                excluded_genres=query.excluded_genres,
-                year_min=query.year_min,
-                year_max=query.year_max,
-                runtime_max_minutes=query.runtime_max_minutes,
-                result_limit=query.result_limit,
-            )
+            if query.similarity_seed_titles:
+                raw_items = await self._discover_via_similarity(query)
+            else:
+                raw_items = await self._tmdb.discover(
+                    media_type=query.media_type,
+                    region=query.region,
+                    provider_names=query.provider_names,
+                    included_genres=query.included_genres,
+                    excluded_genres=query.excluded_genres,
+                    year_min=query.year_min,
+                    year_max=query.year_max,
+                    runtime_max_minutes=query.runtime_max_minutes,
+                    result_limit=query.result_limit,
+                )
         except TmdbAdapterError as exc:
             return CandidatePool(candidates=[], retry_number=query.retry_number, error=exc.error)
 
@@ -85,3 +88,24 @@ class DiscoveryAgent:
             retry_number=query.retry_number,
             relaxed_constraint=query.relaxed_constraint,
         )
+
+    async def _discover_via_similarity(self, query: DiscoveryQuery) -> list[dict]:
+        """When the user named liked titles (User Story 3), source
+        candidates from TMDB's similar-title lookups for those titles
+        instead of a generic discover query -- title -> id resolution,
+        then similar(), merged and de-duplicated by id.
+        """
+        seen_ids: set[int] = set()
+        merged: list[dict] = []
+        for title in query.similarity_seed_titles:
+            seed_id = await self._tmdb.search_title(media_type=query.media_type, title=title)
+            if seed_id is None:
+                continue
+            similar_items = await self._tmdb.similar(
+                media_type=query.media_type, tmdb_id=seed_id, result_limit=query.result_limit
+            )
+            for item in similar_items:
+                if item["id"] not in seen_ids:
+                    seen_ids.add(item["id"])
+                    merged.append(item)
+        return merged[: query.result_limit]

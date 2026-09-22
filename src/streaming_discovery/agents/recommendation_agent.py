@@ -84,7 +84,8 @@ def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
     if candidate.title in profile.liked_titles:
         score += 3.0
     if candidate.title in profile.disliked_titles:
-        score -= 5.0
+        score -= 5.0  # exact match -- Discovery already hard-excludes this case; safety net
+    score -= _disliked_similarity_penalty(profile, candidate)
     return score
 
 
@@ -95,6 +96,23 @@ def _descriptors(profile: PreferenceProfile) -> list[str]:
 def _descriptor_hit_count(profile: PreferenceProfile, candidate: CandidateMedia) -> int:
     haystack = " ".join([candidate.overview, *candidate.thematic_keywords]).lower()
     return sum(1 for d in _descriptors(profile) if d.lower() in haystack)
+
+
+def _disliked_similarity_penalty(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
+    """Soft deprioritization for a candidate thematically similar to a
+    disliked title (User Story 3) -- distinct from the exact-title-match
+    case above, which Discovery already hard-excludes. This agent cannot
+    call TMDB to learn a disliked title's own genres/keywords
+    (contracts/recommendation-agent.md), so "similar" is approximated the
+    same way tone-descriptor matching is: a mention of the disliked
+    title's name in the candidate's own overview/keywords. Weaker than
+    the exact-match penalty, since it's a weaker signal.
+    """
+    if not profile.disliked_titles:
+        return 0.0
+    haystack = " ".join([candidate.overview, *candidate.thematic_keywords]).lower()
+    hits = sum(1 for title in profile.disliked_titles if title.lower() in haystack)
+    return 2.0 * hits
 
 
 def _has_weak_tone_evidence(profile: PreferenceProfile, candidate: CandidateMedia) -> bool:
