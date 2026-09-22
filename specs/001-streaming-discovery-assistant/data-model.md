@@ -26,6 +26,7 @@ Produced by the Preference Agent (FR-004); consumed by the Orchestrator (to buil
 | `languages` | `list[str]` | Soft unless the user marks it required |
 | `year_min` / `year_max` | `int \| None` | Soft by default; relaxable via `RelaxableConstraint.year_range` |
 | `runtime_max_minutes` | `int \| None` | Soft by default; relaxable via `RelaxableConstraint.runtime` |
+| `season_count_max` | `int \| None` | TV-only; hard only when the user explicitly caps it (e.g., "nothing with more than three seasons" — User Story 5), so it is always added to `hard_override_fields` when set, never left soft by default. Not part of `RelaxableConstraint` — a season-count cap the user stated is never relaxed |
 | `liked_titles` | `list[str]` | Drives similarity-based discovery (User Story 3) |
 | `disliked_titles` | `list[str]` | Soft negative signal for the Recommendation Agent; exact matches also excluded by the Discovery Agent at pool assembly |
 | `additional_notes` | `str \| None` | Free-form, unparsed remainder; soft, consumed only by the Recommendation Agent's rationale step |
@@ -45,6 +46,7 @@ Derived by the Orchestrator from a `PreferenceProfile` plus retry state; consume
 | `included_genres` / `excluded_genres` | `list[str]` | `excluded_genres` is never emptied by relaxation |
 | `year_min` / `year_max` | `int \| None` | May be widened only when `relaxed_constraint == year_range` |
 | `runtime_max_minutes` | `int \| None` | Applied server-side for movies; enforced as a post-filter for TV (see `contracts/discovery-agent.md`). May be widened only when `relaxed_constraint == runtime` |
+| `season_count_max` | `int \| None` | TV-only hard constraint; TMDB has no server-side season-count filter, so — like TV runtime — it is enforced as a post-filter over detail-level data. Never widened by the retry: `excluded_genres`, `media_type`, and any hard-override field including this one stay identical across attempts |
 | `similarity_seed_titles` | `list[str]` | Resolved from `PreferenceProfile.liked_titles` (title → TMDB id resolution happens inside the Discovery Agent, not in this contract) |
 | `exclude_titles` | `list[str]` | From `PreferenceProfile.disliked_titles`, for exact-match exclusion at pool assembly |
 | `relaxed_constraint` | `RelaxableConstraint \| None` | `None` on the initial attempt; set to exactly one value on the retry attempt |
@@ -66,7 +68,8 @@ Produced by the Discovery Agent from normalized TMDB data (FR-008); consumed by 
 | `genres` | `list[str]` | Resolved names only — never raw TMDB genre ids |
 | `release_year` | `int \| None` | Year only, not a full date |
 | `vote_average` | `float` | Ranking signal, near-duplicate tie-break |
-| `runtime_minutes` | `int \| None` | **Enrichment field** — populated only for candidates reaching ranking (FR-029), not the raw pool |
+| `runtime_minutes` | `int \| None` | **Enrichment field** for display/ranking; populated for ranking-stage candidates per FR-029. When runtime is a *hard* TV constraint, this same detail data is fetched earlier, over the raw pool, purely to filter — see the Discovery Agent contract's hard-filter note |
+| `season_count` | `int \| None` | TV-only. Same treatment as `runtime_minutes`: a display/ranking enrichment field normally, but fetched over the raw pool for hard filtering when `season_count_max` is a stated hard constraint (User Story 5) |
 | `provider_names` | `list[str]` | **Enrichment field** — flatrate-only, configured region only (FR-019); populated only for candidates reaching ranking |
 | `thematic_keywords` | `list[str]` | **Enrichment field** — populated only for candidates reaching ranking |
 
