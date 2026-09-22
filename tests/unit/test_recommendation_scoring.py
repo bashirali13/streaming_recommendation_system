@@ -58,6 +58,24 @@ class TestSoftScore:
 
         assert _soft_score(profile, disliked) < disliked.vote_average
 
+    def test_candidate_thematically_similar_to_a_disliked_title_is_deprioritized(self):
+        """A candidate is never named after the disliked title (Discovery
+        already hard-excludes an exact match), but shares its name as a
+        keyword/reference in its overview -- the soft, thematic-similarity
+        case User Story 3 asks for, distinct from the exact-match case
+        above. RecommendationAgent cannot call TMDB to learn the disliked
+        title's own genres (contracts/recommendation-agent.md), so this
+        uses the same text-overlap heuristic already used for tone
+        descriptors, deliberately weaker than the exact-match penalty.
+        """
+        profile = PreferenceProfile(genres=["Drama"], disliked_titles=["Bleak City"])
+        similar_to_disliked = _candidate(
+            title="Different Title", overview="A spiritual successor to Bleak City."
+        )
+        unrelated = _candidate(tmdb_id=2, title="Other Title", overview="Nothing related.")
+
+        assert _soft_score(profile, similar_to_disliked) < _soft_score(profile, unrelated)
+
 
 class TestWeakToneEvidence:
     def test_no_descriptors_stated_is_never_weak(self):

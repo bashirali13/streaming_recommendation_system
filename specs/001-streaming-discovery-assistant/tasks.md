@@ -150,15 +150,15 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ### Tests for User Story 3 (write first; must fail before implementation)
 
-- [ ] T052 [P] [US3] E2E test: `liked_titles` is recorded distinctly from genre/tone fields, the bleakness exclusion is soft (not hard), and the candidate pool traces to the similarity-lookup fixture rather than a generic-discover fixture, in `tests/e2e/test_similarity_request.py`, using the quickstart.md scenario 3 fixtures (spec.md US3 Acceptance Scenarios 1–2)
-- [ ] T053 [P] [US3] Adapter test: `FakeTmdbClient`'s similarity-lookup path (title → id resolution, then similar-title results) returns the expected fixture set, in `tests/tmdb_adapter/test_similarity_lookup.py`
+- [x] T052 [P] [US3] E2E test: `liked_titles` is recorded distinctly from genre/tone fields, the bleakness exclusion is soft (not hard), and the candidate pool traces to the similarity-lookup fixture rather than a generic-discover fixture, in `tests/e2e/test_similarity_request.py`, using the quickstart.md scenario 3 fixtures (spec.md US3 Acceptance Scenarios 1–2)
+- [x] T053 [P] [US3] Adapter test: `FakeTmdbClient`'s similarity-lookup path (title → id resolution, then similar-title results) returns the expected fixture set, in `tests/tmdb_adapter/test_similarity_lookup.py` — **already satisfied** by `search_title`/`similar` built in Foundational (T026); this test just confirms it
 
 ### Implementation for User Story 3
 
-- [ ] T054 [US3] Implement similarity-seed resolution and the similar-title discovery path (`liked_titles` → `similarity_seed_titles` → TMDB similar/recommendations lookup, in place of a generic discover query) in `src/streaming_discovery/agents/discovery_agent.py` and `src/streaming_discovery/tmdb/client.py` (depends on T042)
-- [ ] T055 [US3] Implement `disliked_titles` soft-penalty scoring in the `RecommendationAgent` (deprioritize candidates thematically similar to a disliked title) in `src/streaming_discovery/agents/recommendation_agent.py` (depends on T043)
+- [x] T054 [US3] Implement similarity-seed resolution and the similar-title discovery path (`liked_titles` → `similarity_seed_titles` → TMDB similar/recommendations lookup, in place of a generic discover query) in `src/streaming_discovery/agents/discovery_agent.py` and `src/streaming_discovery/tmdb/client.py` (depends on T042)
+- [x] T055 [US3] Implement `disliked_titles` soft-penalty scoring in the `RecommendationAgent` (deprioritize candidates thematically similar to a disliked title) in `src/streaming_discovery/agents/recommendation_agent.py` (depends on T043). Since the Recommendation Agent cannot call TMDB to learn a disliked title's own genres, "thematic similarity" uses the same overview/keyword text-overlap heuristic already used for tone-descriptor matching (deliberately weaker than the exact-title-match penalty, which is a safety net for a case Discovery already hard-excludes) — a documented design decision, not a deferred one; unit-tested in `tests/unit/test_recommendation_scoring.py`.
 
-**Checkpoint**: User Stories 1–3 independently functional.
+**Checkpoint**: User Stories 1–3 independently functional. Verified: 88 tests passing, `ruff check`/`ruff format --check` clean.
 
 ---
 
