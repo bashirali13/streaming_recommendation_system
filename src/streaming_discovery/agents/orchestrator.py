@@ -221,10 +221,9 @@ class Orchestrator:
         intake_answers: dict[str, str | None] | None = None,
         confirm: ConfirmCallback | None = None,
     ) -> RecommendationPackage:
-        """The full single-attempt pipeline (Preference -> confirmation
-        -> Discovery -> Recommendation), per contracts/orchestrator.md.
-        Retry logic is added in User Story 4 (tasks.md T059); this method
-        is what that retry will wrap the discovery step of.
+        """The full pipeline (Preference -> confirmation -> Discovery,
+        with the one allowed zero-result retry -> Recommendation), per
+        contracts/orchestrator.md and FR-011/FR-012.
         """
         profile = await self.interpret_preferences(
             raw_user_input=raw_user_input, intake_answers=intake_answers
@@ -241,7 +240,89 @@ class Orchestrator:
                 unresolved_notes=f"TMDB is currently unavailable: {pool.error.detail}"
             )
 
+        if not pool.candidates:
+            relaxed = select_relaxation_constraint(profile)
+            if relaxed is not None:
+                logger.info("orchestrator: zero candidates, retrying with %s relaxed", relaxed)
+                retry_queries = self.build_discovery_queries(
+                    profile, retry_number=1, relaxed_constraint=relaxed
+                )
+                pool = await self.run_discovery_attempt(retry_queries)
+                if pool.error is not None:
+                    return RecommendationPackage(
+                        unresolved_notes=f"TMDB is currently unavailable: {pool.error.detail}"
+                    )
+            if not pool.candidates:
+                logger.info("orchestrator: no match after the allowed retry, stopping")
+                return RecommendationPackage(
+                    relaxed_constraint=pool.relaxed_constraint,
+                    unresolved_notes=(
+                        "No matches were found"
+                        + (f" even after relaxing {relaxed.value}" if relaxed else "")
+                        + f". Still applied: {_describe_blocking_constraints(profile)}."
+                    ),
+                )
+
         return await self.recommend(profile, pool)
+
+
+_RELAXATION_PRIORITY_ORDER = (
+    RelaxableConstraint.TONE,
+    RelaxableConstraint.RUNTIME,
+    RelaxableConstraint.YEAR_RANGE,
+)
+
+
+def select_relaxation_constraint(profile: PreferenceProfile) -> RelaxableConstraint | None:
+    """The first constraint in FR-011's fixed priority order (tone ->
+    runtime -> year_range) that is both stated on the profile and not
+    marked non-negotiable via `hard_override_fields`. Returns `None` when
+    nothing is eligible -- `excluded_genres`/`media_type`/any
+    hard-overridden field are never legal return values here, since
+    `RelaxableConstraint`'s own closed enum makes that structurally
+    impossible, not just a convention (FR-010).
+    """
+    tone_present = bool(
+        profile.tone_descriptors or profile.setting_descriptors or profile.theme_descriptors
+    )
+    runtime_eligible = (
+        profile.runtime_max_minutes is not None
+        and "runtime_max_minutes" not in profile.hard_override_fields
+    )
+    year_eligible = (
+        (profile.year_min is not None or profile.year_max is not None)
+        and "year_min" not in profile.hard_override_fields
+        and "year_max" not in profile.hard_override_fields
+    )
+    eligible = {
+        RelaxableConstraint.TONE: tone_present,
+        RelaxableConstraint.RUNTIME: runtime_eligible,
+        RelaxableConstraint.YEAR_RANGE: year_eligible,
+    }
+    for constraint in _RELAXATION_PRIORITY_ORDER:
+        if eligible[constraint]:
+            return constraint
+    return None
+
+
+def _describe_blocking_constraints(profile: PreferenceProfile) -> str:
+    """A concise, human-readable summary of the constraints still applied
+    after the allowed retry, for the no-match explanation (FR-012).
+    """
+    parts: list[str] = []
+    if profile.media_type is not None:
+        parts.append(f"format={profile.media_type.value}")
+    if profile.providers:
+        parts.append(f"providers={', '.join(profile.providers)}")
+    if profile.genres:
+        parts.append(f"genres={', '.join(profile.genres)}")
+    if profile.excluded_genres:
+        parts.append(f"excluding={', '.join(profile.excluded_genres)}")
+    for field_name in profile.hard_override_fields:
+        value = getattr(profile, field_name, None)
+        if value is not None:
+            parts.append(f"{field_name}={value}")
+    return "; ".join(parts) if parts else "no constraints were stated"
 
 
 def build_confirmation_summary(profile: PreferenceProfile) -> str:

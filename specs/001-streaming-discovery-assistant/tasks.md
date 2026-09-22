@@ -170,18 +170,18 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ### Tests for User Story 4 (write first; must fail before implementation)
 
-- [ ] T056 [P] [US4] E2E test: a comedy-with-runtime-ceiling request that returns zero candidates initially triggers exactly one retry with the runtime constraint relaxed (not the genre), and the final output discloses the relaxed constraint, in `tests/e2e/test_runtime_retry_success.py`, using the quickstart.md scenario 4 fixtures (spec.md US4 Acceptance Scenarios 1–2)
-- [ ] T057 [P] [US4] E2E test: when the retried search also returns zero candidates, the session stops without a second retry and explains which constraints blocked a match, in `tests/e2e/test_runtime_retry_failure.py`, using the quickstart.md scenario 4b fixtures (spec.md US4 Acceptance Scenario 3)
-- [ ] T058 [P] [US4] Unit test: the relaxation-priority helper picks the first eligible constraint in the fixed order (tone → runtime → year_range) present on the profile, and never returns `excluded_genres`, `media_type`, or any `hard_override_fields` entry as relaxable, in `tests/unit/test_relaxation_policy.py` (FR-011, FR-010)
+- [x] T056 [P] [US4] E2E test: a comedy-with-runtime-ceiling request that returns zero candidates initially triggers exactly one retry with the runtime constraint relaxed (not the genre), and the final output discloses the relaxed constraint, in `tests/e2e/test_runtime_retry_success.py`, using the quickstart.md scenario 4 fixtures (spec.md US4 Acceptance Scenarios 1–2)
+- [x] T057 [P] [US4] E2E test: when the retried search also returns zero candidates, the session stops without a second retry and explains which constraints blocked a match, in `tests/e2e/test_runtime_retry_failure.py`, using the quickstart.md scenario 4b fixtures (spec.md US4 Acceptance Scenario 3)
+- [x] T058 [P] [US4] Unit test: the relaxation-priority helper picks the first eligible constraint in the fixed order (tone → runtime → year_range) present on the profile, and never returns `excluded_genres`, `media_type`, or any `hard_override_fields` entry as relaxable, in `tests/unit/test_relaxation_policy.py` (FR-011, FR-010)
 
 ### Implementation for User Story 4
 
-- [ ] T059 [US4] Implement the Orchestrator's retry decision (`retry_number=0` result has zero candidates and no error → issue exactly one `retry_number=1` attempt with `relaxed_constraint` set; a second empty result → stop, no further retry) in `src/streaming_discovery/agents/orchestrator.py`, per contracts/orchestrator.md (depends on T033, T044)
-- [ ] T060 [US4] Implement the relaxation-priority selection helper (first eligible soft constraint present on the profile, per FR-011's fixed order) in `src/streaming_discovery/agents/orchestrator.py`
-- [ ] T061 [US4] Implement `relaxed_constraint` disclosure in the assembled `RecommendationPackage` and in CLI rendering in `src/streaming_discovery/agents/orchestrator.py` and `src/streaming_discovery/cli/output.py` (FR-013) (depends on T059)
-- [ ] T062 [US4] Implement the `unresolved_notes` no-match explanation when the retry also yields zero candidates in `src/streaming_discovery/agents/orchestrator.py` (FR-012)
+- [x] T059 [US4] Implement the Orchestrator's retry decision (`retry_number=0` result has zero candidates and no error → issue exactly one `retry_number=1` attempt with `relaxed_constraint` set; a second empty result → stop, no further retry) in `src/streaming_discovery/agents/orchestrator.py`, per contracts/orchestrator.md (depends on T033, T044). `FakeTmdbClient` gained a `discover_sequence` option (call-count-sensitive responses) to make the zero-then-nonzero retry scenario testable — a test-infrastructure addition, not a new requirement.
+- [x] T060 [US4] Implement the relaxation-priority selection helper (`select_relaxation_constraint`, first eligible soft constraint present on the profile, per FR-011's fixed order) in `src/streaming_discovery/agents/orchestrator.py`
+- [x] T061 [US4] Implement `relaxed_constraint` disclosure in the assembled `RecommendationPackage` and in CLI rendering in `src/streaming_discovery/agents/orchestrator.py` and `src/streaming_discovery/cli/output.py` (FR-013) (depends on T059) — **CLI rendering already implemented** in `render_package` during User Story 1; only the Orchestrator-side wiring (setting `relaxed_constraint` on the package via the retried pool) was new here.
+- [x] T062 [US4] Implement the `unresolved_notes` no-match explanation when the retry also yields zero candidates in `src/streaming_discovery/agents/orchestrator.py` (FR-012), naming the still-applied constraints via `_describe_blocking_constraints`
 
-**Checkpoint**: User Stories 1–4 independently functional; the retry policy is fully demonstrated.
+**Checkpoint**: User Stories 1–4 independently functional; the retry policy is fully demonstrated. Verified: 97 tests passing, `ruff check`/`ruff format --check` clean.
 
 ---
 
