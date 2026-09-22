@@ -42,6 +42,7 @@ asyncio_mode = "auto"
 markers = [
     "contract: validates a Pydantic contract at an agent handoff boundary",
     "unit: exercises a single deterministic unit (helper, filter, scoring rule)",
+    "tmdb_adapter: exercises the TMDB adapter (real client against a mocked transport, or the fixture-backed fake)",
     "integration: exercises multiple components together, still fixture-backed",
     "e2e: exercises a full quickstart.md scenario end-to-end, fixture-backed",
     "adversarial: exercises a deliberately hostile/malformed input case",
