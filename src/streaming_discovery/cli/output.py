@@ -123,12 +123,38 @@ def render_package(package: RecommendationPackage) -> str:
 
 
 def build_orchestrator(settings: Settings) -> Orchestrator:
-    """Production wiring: real TMDB/model clients from `Settings`. Demo
-    mode uses fixture-backed fakes instead (wired separately, per NFR-004
-    -- see the quickstart.md walkthroughs)."""
+    """Production wiring: real TMDB/model clients from `Settings`, unless
+    `settings.demo_mode` is set, in which case fixture-backed fakes are
+    used instead (NFR-004, FR-025) -- no live credentials required. This
+    field has existed on `Settings` since Foundational; this is the
+    first place anything actually branches on it.
+    """
+    if settings.demo_mode:
+        from streaming_discovery.demo import (
+            build_demo_preference_provider,
+            build_demo_recommendation_provider,
+            build_demo_tmdb_client,
+        )
+
+        preference_provider: ModelProvider = build_demo_preference_provider()
+        recommendation_provider: ModelProvider = build_demo_recommendation_provider()
+        tmdb_client: TmdbClient = build_demo_tmdb_client()
+        return Orchestrator(
+            preference_agent=PreferenceAgent(
+                provider=preference_provider,
+                max_additional_attempts=settings.llm_retry_max_attempts,
+            ),
+            discovery_agent=DiscoveryAgent(tmdb_client=tmdb_client),
+            recommendation_agent=RecommendationAgent(
+                provider=recommendation_provider,
+                max_additional_attempts=settings.llm_retry_max_attempts,
+            ),
+            region=settings.region,
+        )
+
     from streaming_discovery.tmdb.client import build_real_tmdb_client
 
-    tmdb_client: TmdbClient = build_real_tmdb_client(settings.tmdb_api_token)
+    real_tmdb_client: TmdbClient = build_real_tmdb_client(settings.tmdb_api_token)
     model_provider: ModelProvider = _RealModelProvider(
         model_name=settings.model_name, api_key=settings.openrouter_api_key
     )
@@ -136,7 +162,7 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
         preference_agent=PreferenceAgent(
             provider=model_provider, max_additional_attempts=settings.llm_retry_max_attempts
         ),
-        discovery_agent=DiscoveryAgent(tmdb_client=tmdb_client),
+        discovery_agent=DiscoveryAgent(tmdb_client=real_tmdb_client),
         recommendation_agent=RecommendationAgent(
             provider=model_provider, max_additional_attempts=settings.llm_retry_max_attempts
         ),

@@ -111,6 +111,19 @@ class TestPrintRecommendationPackage:
 
         assert "No candidates satisfied your request." in buffer.getvalue()
 
+    def test_role_markers_are_ascii_safe_for_legacy_windows_consoles(self):
+        """Real (non-StringIO) Windows consoles auto-translate Rich's
+        Unicode box-drawing characters to ASCII at write time, but that
+        translation does not extend to arbitrary content like a marker
+        character -- one of those crashed with UnicodeEncodeError on a
+        legacy (cp1252) console. Regression test for that: the role
+        markers used to be "●"; assert each stays plain ASCII.
+        """
+        from streaming_discovery.cli.rich_ui import _ROLE_DISPLAY
+
+        for _style, marker in _ROLE_DISPLAY.values():
+            marker.encode("ascii")  # must not raise
+
 
 def test_welcome_banner_does_not_raise():
     console, buffer = _capturing_console()

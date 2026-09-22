@@ -24,6 +24,7 @@ from streaming_discovery.contracts.discovery_query import DiscoveryQuery
 from streaming_discovery.contracts.enums import MediaType, RelaxableConstraint
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.contracts.recommendation_package import RecommendationPackage
+from streaming_discovery.contracts.session_state import UserSessionState
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
 
@@ -83,6 +84,15 @@ class Orchestrator:
     `recommendation_agent` may be `None` for tests that only exercise
     preference interpretation and/or discovery (e.g. the Foundational
     contract-validation-boundary tests, predating User Story 1).
+
+    `self.session` (FR-023, FR-024) is populated as `run_single_attempt`
+    progresses -- exposed as an attribute rather than folded into that
+    method's return value, so the export feature (Polish) has a real
+    `UserSessionState` to read without changing what every existing
+    caller/test already expects `run_single_attempt` to return. Since
+    the project is explicitly single-user/single-session in scope
+    (spec.md Assumptions), one mutable attribute per Orchestrator
+    instance is sufficient; nothing here needs to be concurrency-safe.
     """
 
     def __init__(
@@ -99,6 +109,7 @@ class Orchestrator:
         self._recommendation_agent = recommendation_agent
         self._region = region
         self._result_limit = result_limit
+        self.session = UserSessionState()
 
     async def interpret_preferences(
         self,
@@ -228,8 +239,13 @@ class Orchestrator:
     ) -> RecommendationPackage:
         """The full pipeline (Preference -> confirmation -> Discovery,
         with the one allowed zero-result retry -> Recommendation), per
-        contracts/orchestrator.md and FR-011/FR-012.
+        contracts/orchestrator.md and FR-011/FR-012. Also (re)builds
+        `self.session` (FR-023, FR-024) as it progresses.
         """
+        self.session = UserSessionState(
+            raw_user_input=raw_user_input, intake_answers=intake_answers or {}
+        )
+
         profile = await self.interpret_preferences(
             raw_user_input=raw_user_input, intake_answers=intake_answers
         )
@@ -237,13 +253,17 @@ class Orchestrator:
             correction = await confirm(profile)
             if correction:
                 profile = apply_correction(profile, correction)
+        self.session.preference_profile = profile
 
         queries = self.build_discovery_queries(profile, retry_number=0)
         pool = await self.run_discovery_attempt(queries)
+        self.session.discovery_attempts.append(pool)
         if pool.error is not None:
-            return RecommendationPackage(
+            package = RecommendationPackage(
                 unresolved_notes=f"TMDB is currently unavailable: {pool.error.detail}"
             )
+            self.session.recommendation_package = package
+            return package
 
         if not pool.candidates:
             relaxed = select_relaxation_constraint(profile)
@@ -253,13 +273,16 @@ class Orchestrator:
                     profile, retry_number=1, relaxed_constraint=relaxed
                 )
                 pool = await self.run_discovery_attempt(retry_queries)
+                self.session.discovery_attempts.append(pool)
                 if pool.error is not None:
-                    return RecommendationPackage(
+                    package = RecommendationPackage(
                         unresolved_notes=f"TMDB is currently unavailable: {pool.error.detail}"
                     )
+                    self.session.recommendation_package = package
+                    return package
             if not pool.candidates:
                 logger.info("orchestrator: no match after the allowed retry, stopping")
-                return RecommendationPackage(
+                package = RecommendationPackage(
                     relaxed_constraint=pool.relaxed_constraint,
                     unresolved_notes=(
                         "No matches were found"
@@ -267,8 +290,12 @@ class Orchestrator:
                         + f". Still applied: {_describe_blocking_constraints(profile)}."
                     ),
                 )
+                self.session.recommendation_package = package
+                return package
 
-        return await self.recommend(profile, pool)
+        package = await self.recommend(profile, pool)
+        self.session.recommendation_package = package
+        return package
 
 
 _RELAXATION_PRIORITY_ORDER = (
