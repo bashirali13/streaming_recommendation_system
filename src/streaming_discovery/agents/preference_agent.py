@@ -1,0 +1,69 @@
+"""PreferenceAgent: translates natural language and intake answers into a
+structured PreferenceProfile.
+
+See specs/001-streaming-discovery-assistant/contracts/preference-agent.md.
+
+LLM-backed (NFR-008): the only work this class does is ask the model to
+fill in a PreferenceProfile; it never calls TMDB, ranks a title, or
+relaxes a constraint.
+"""
+
+from __future__ import annotations
+
+from streaming_discovery.contracts.preference_profile import PreferenceProfile
+from streaming_discovery.llm.provider import ModelProvider, generate_with_retry
+
+SYSTEM_PROMPT = """\
+You translate a user's streaming-discovery request into a PreferenceProfile.
+
+Rules:
+- Extract only what the user actually said. Never invent a value for a
+  field the user did not address; leave it null/empty.
+- Classify format, explicit exclusions, and providers as hard constraints
+  by default. Classify tone, mood, thematic similarity, and recency as
+  soft preferences by default.
+- If the user's own language marks an otherwise-soft field as
+  non-negotiable (e.g. "it MUST be...", "no exceptions"), add that
+  field's name to hard_override_fields.
+- If the user states a maximum season count for a TV show, always add
+  "season_count_max" to hard_override_fields -- a stated season cap is
+  never soft.
+- Do not call any tool, recommend a title, or resolve a conflicting
+  request yourself -- describe what was said, even if it seems to
+  conflict internally.
+"""
+
+
+def build_preference_prompt(
+    raw_user_input: str | None, intake_answers: dict[str, str | None]
+) -> str:
+    """Combine free text and guided-intake answers into one prompt. For a
+    pure free-text request (no intake answers), this is the raw text
+    unchanged, keeping fixture/test prompts simple and exact-matchable.
+    Exposed (not prefixed with an underscore) so tests can compute the
+    same key `FakeModelProvider` should respond to.
+    """
+    if not intake_answers:
+        return raw_user_input or ""
+    answer_lines = [f"{key}: {value}" for key, value in intake_answers.items() if value]
+    parts = [raw_user_input] if raw_user_input else []
+    parts.extend(answer_lines)
+    return "\n".join(parts)
+
+
+class PreferenceAgent:
+    def __init__(self, *, provider: ModelProvider, max_additional_attempts: int) -> None:
+        self._provider = provider
+        self._max_additional_attempts = max_additional_attempts
+
+    async def run(
+        self, *, raw_user_input: str | None, intake_answers: dict[str, str | None]
+    ) -> PreferenceProfile:
+        user_prompt = build_preference_prompt(raw_user_input, intake_answers)
+        return await generate_with_retry(
+            self._provider,
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            output_type=PreferenceProfile,
+            max_additional_attempts=self._max_additional_attempts,
+        )

@@ -38,6 +38,7 @@ async def test_invalid_preference_agent_output_is_a_controlled_failure():
     orchestrator = Orchestrator(
         preference_agent=_ReturnsInvalidPreferenceProfile(),
         discovery_agent=_ReturnsValidCandidatePool(),
+        region="US",
     )
 
     with pytest.raises(ContractValidationError) as exc_info:
@@ -52,6 +53,7 @@ async def test_valid_preference_agent_output_passes_through():
     orchestrator = Orchestrator(
         preference_agent=_ReturnsValidPreferenceProfile(),
         discovery_agent=_ReturnsValidCandidatePool(),
+        region="US",
     )
 
     profile = await orchestrator.interpret_preferences(
@@ -67,6 +69,7 @@ async def test_discovery_agent_returning_the_wrong_type_is_a_controlled_failure(
     orchestrator = Orchestrator(
         preference_agent=_ReturnsValidPreferenceProfile(),
         discovery_agent=_ReturnsWrongType(),
+        region="US",
     )
     query = DiscoveryQuery(media_type=MediaType.MOVIE, region="US", retry_number=0)
 
@@ -82,6 +85,7 @@ async def test_valid_discovery_agent_output_passes_through():
     orchestrator = Orchestrator(
         preference_agent=_ReturnsValidPreferenceProfile(),
         discovery_agent=_ReturnsValidCandidatePool(),
+        region="US",
     )
     query = DiscoveryQuery(media_type=MediaType.MOVIE, region="US", retry_number=0)
 

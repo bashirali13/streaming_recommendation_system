@@ -13,15 +13,21 @@ when User Story 1 is implemented (T044).
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from streaming_discovery.contracts.candidate_pool import CandidatePool
 from streaming_discovery.contracts.discovery_query import DiscoveryQuery
+from streaming_discovery.contracts.enums import MediaType, RelaxableConstraint
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
+from streaming_discovery.contracts.recommendation_package import RecommendationPackage
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
+
+logger = logging.getLogger("streaming_discovery.orchestrator")
 
 
 class ContractValidationError(Exception):
@@ -61,12 +67,22 @@ class DiscoveryAgentLike(Protocol):
     async def run(self, query: DiscoveryQuery) -> CandidatePool: ...
 
 
+class RecommendationAgentLike(Protocol):
+    async def run(
+        self, profile: PreferenceProfile, pool: CandidatePool
+    ) -> RecommendationPackage: ...
+
+
+ConfirmCallback = Callable[[PreferenceProfile], Awaitable[dict | None]]
+
+
 class Orchestrator:
-    """Sequences the Preference and Discovery agents for one discovery
-    attempt, validating every handoff. Both agents are injected so this
-    class is testable without a real model or TMDB call, and so the
-    concrete agent implementations (built in User Story 1) don't need to
-    exist yet for this sequencing logic to be exercised.
+    """Sequences the Preference, Discovery, and Recommendation agents for
+    one full request, validating every handoff. All three agents are
+    injected so this class is testable without a real model or TMDB call.
+    `recommendation_agent` may be `None` for tests that only exercise
+    preference interpretation and/or discovery (e.g. the Foundational
+    contract-validation-boundary tests, predating User Story 1).
     """
 
     def __init__(
@@ -74,9 +90,15 @@ class Orchestrator:
         *,
         preference_agent: PreferenceAgentLike,
         discovery_agent: DiscoveryAgentLike,
+        recommendation_agent: RecommendationAgentLike | None = None,
+        region: str,
+        result_limit: int = 20,
     ) -> None:
         self._preference_agent = preference_agent
         self._discovery_agent = discovery_agent
+        self._recommendation_agent = recommendation_agent
+        self._region = region
+        self._result_limit = result_limit
 
     async def interpret_preferences(
         self,
@@ -86,16 +108,140 @@ class Orchestrator:
     ) -> PreferenceProfile:
         """Invoke the Preference Agent and validate its output at the
         handoff boundary (FR-004, FR-022)."""
+        logger.info("preference_agent: invoking")
         raw_result = await self._preference_agent.run(
             raw_user_input=raw_user_input, intake_answers=intake_answers or {}
         )
-        return validate_handoff(raw_result, PreferenceProfile)
+        profile = validate_handoff(raw_result, PreferenceProfile)
+        logger.info("preference_agent: handoff validated")
+        return profile
 
     async def discover_once(self, query: DiscoveryQuery) -> CandidatePool:
         """Invoke the Discovery Agent for one attempt and validate its
         output at the handoff boundary (FR-022)."""
+        logger.info("discovery_agent: invoking (retry_number=%d)", query.retry_number)
         raw_result = await self._discovery_agent.run(query)
-        return validate_handoff(raw_result, CandidatePool)
+        pool = validate_handoff(raw_result, CandidatePool)
+        logger.info(
+            "discovery_agent: handoff validated (%d candidates, error=%s)",
+            len(pool.candidates),
+            pool.error,
+        )
+        return pool
+
+    def _resolve_media_types(self, profile: PreferenceProfile) -> list[MediaType]:
+        if profile.media_type in (None, MediaType.EITHER):
+            return [MediaType.MOVIE, MediaType.TV]
+        return [profile.media_type]
+
+    def build_discovery_queries(
+        self,
+        profile: PreferenceProfile,
+        *,
+        retry_number: int,
+        relaxed_constraint: RelaxableConstraint | None = None,
+    ) -> list[DiscoveryQuery]:
+        """Derive one `DiscoveryQuery` per resolved media type from a
+        `PreferenceProfile` (data-model.md: an unresolved `either`/`None`
+        format runs one query per attempt for each type, merged by
+        `run_discovery_attempt`). Deliberately excludes every subjective
+        field (tone/setting/theme) -- those never cross into a
+        TMDB-shaped query (contracts/discovery-agent.md).
+
+        NOTE: relaxing `RelaxableConstraint.TONE` has no concrete query-
+        level effect yet, since tone never reaches `DiscoveryQuery` in
+        the first place -- its exact effect (most likely widening
+        `included_genres` when those were tone-derived) is resolved when
+        User Story 4's retry logic is implemented (tasks.md T059-T060),
+        which is also the first caller that will ever pass
+        `relaxed_constraint=TONE` here.
+        """
+        year_min, year_max = profile.year_min, profile.year_max
+        runtime_max = profile.runtime_max_minutes
+        if relaxed_constraint is RelaxableConstraint.YEAR_RANGE:
+            year_min = year_max = None
+        if relaxed_constraint is RelaxableConstraint.RUNTIME:
+            runtime_max = None
+        return [
+            DiscoveryQuery(
+                media_type=media_type,
+                provider_names=profile.providers,
+                region=self._region,
+                included_genres=profile.genres,
+                excluded_genres=profile.excluded_genres,
+                year_min=year_min,
+                year_max=year_max,
+                runtime_max_minutes=runtime_max,
+                season_count_max=profile.season_count_max,
+                similarity_seed_titles=profile.liked_titles,
+                exclude_titles=profile.disliked_titles,
+                relaxed_constraint=relaxed_constraint,
+                retry_number=retry_number,
+                result_limit=self._result_limit,
+            )
+            for media_type in self._resolve_media_types(profile)
+        ]
+
+    async def run_discovery_attempt(self, queries: list[DiscoveryQuery]) -> CandidatePool:
+        """Run one or more `DiscoveryQuery` (more than one only when the
+        format was unresolved) and merge into a single `CandidatePool`.
+        The first TMDB error encountered short-circuits the merge -- a
+        partial success is not reported as a success (FR-027).
+        """
+        merged_candidates = []
+        for query in queries:
+            pool = await self.discover_once(query)
+            if pool.error is not None:
+                return pool
+            merged_candidates.extend(pool.candidates)
+        first = queries[0]
+        return CandidatePool(
+            candidates=merged_candidates,
+            retry_number=first.retry_number,
+            relaxed_constraint=first.relaxed_constraint,
+        )
+
+    async def recommend(
+        self, profile: PreferenceProfile, pool: CandidatePool
+    ) -> RecommendationPackage:
+        """Invoke the Recommendation Agent and validate its output at the
+        handoff boundary (FR-022)."""
+        if self._recommendation_agent is None:
+            raise RuntimeError("Orchestrator was constructed without a recommendation_agent")
+        logger.info("recommendation_agent: invoking")
+        raw_result = await self._recommendation_agent.run(profile, pool)
+        package = validate_handoff(raw_result, RecommendationPackage)
+        logger.info("recommendation_agent: handoff validated")
+        return package
+
+    async def run_single_attempt(
+        self,
+        *,
+        raw_user_input: str | None,
+        intake_answers: dict[str, str | None] | None = None,
+        confirm: ConfirmCallback | None = None,
+    ) -> RecommendationPackage:
+        """The full single-attempt pipeline (Preference -> confirmation
+        -> Discovery -> Recommendation), per contracts/orchestrator.md.
+        Retry logic is added in User Story 4 (tasks.md T059); this method
+        is what that retry will wrap the discovery step of.
+        """
+        profile = await self.interpret_preferences(
+            raw_user_input=raw_user_input, intake_answers=intake_answers
+        )
+        if confirm is not None:
+            correction = await confirm(profile)
+            if correction:
+                profile = apply_correction(profile, correction)
+
+        queries = self.build_discovery_queries(profile, retry_number=0)
+        pool = await self.run_discovery_attempt(queries)
+        if pool.error is not None:
+            return RecommendationPackage(
+                unresolved_notes=f"TMDB is currently unavailable: {pool.error.detail}"
+            )
+
+        return await self.recommend(profile, pool)
 
 
 def build_confirmation_summary(profile: PreferenceProfile) -> str:
@@ -141,7 +287,10 @@ def apply_correction(profile: PreferenceProfile, correction: dict) -> Preference
     into `profile` and re-validate the result at the boundary (FR-006,
     FR-022). Raises `ContractValidationError` if the corrected profile is
     invalid (e.g. it would leave every signal field empty, or produce an
-    inverted year range).
+    inverted year range). Merges into the raw dump rather than using
+    `model_copy(update=...)`, so a raw correction value (e.g. the string
+    "tv") is validated/coerced into its proper type (e.g. `MediaType.TV`)
+    in one pass, instead of being carried as an un-coerced raw value.
     """
-    updated = profile.model_copy(update=correction)
-    return validate_handoff(updated, PreferenceProfile)
+    merged = {**profile.model_dump(mode="json"), **correction}
+    return validate_handoff(merged, PreferenceProfile)
