@@ -130,15 +130,15 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ### Tests for User Story 2 (write first; must fail before implementation)
 
-- [ ] T048 [P] [US2] E2E test: the vague-mood request leaves `PreferenceProfile.media_type` and `.providers` unset, still returns picks when the fixture pool supports it, and at least one pick's rationale reflects tone-based matching, in `tests/e2e/test_vague_mood_request.py`, using the quickstart.md scenario 2 fixtures (spec.md US2 Acceptance Scenarios 1–2)
-- [ ] T049 [P] [US2] Unit test: given free text mentioning only tone/setting descriptors, the `PreferenceAgent` leaves every unmentioned field `None`/empty rather than defaulted, in `tests/unit/test_preference_agent_blank_fields.py` (FR-003)
-- [ ] T050 [P] [US2] Unit test: a candidate with strong tone-descriptor evidence in its overview/keywords gets no `confidence_note`; a candidate with weak/absent evidence does, in `tests/unit/test_confidence_scoring.py` (spec.md US2 Acceptance Scenario 3) — write this first; it must fail before T051
+- [x] T048 [P] [US2] E2E test: the vague-mood request leaves `PreferenceProfile.media_type` and `.providers` unset, still returns picks when the fixture pool supports it, and at least one pick's rationale reflects tone-based matching, in `tests/e2e/test_vague_mood_request.py`, using the quickstart.md scenario 2 fixtures (spec.md US2 Acceptance Scenarios 1–2)
+- [x] T049 [P] [US2] Unit test: given free text mentioning only tone/setting descriptors, the `PreferenceAgent` leaves every unmentioned field `None`/empty rather than defaulted, in `tests/unit/test_preference_agent_blank_fields.py` (FR-003)
+- [x] T050 [P] [US2] Unit test: a candidate with strong tone-descriptor evidence in its overview/keywords gets no `confidence_note`; a candidate with weak/absent evidence does, in `tests/unit/test_confidence_scoring.py` (spec.md US2 Acceptance Scenario 3) — **already satisfied**: written as `tests/unit/test_recommendation_scoring.py::TestWeakToneEvidence` during User Story 1's implementation, since the confidence-note mechanism was natural to build alongside the rest of `RecommendationAgent`'s scoring logic rather than split across two stories
 
 ### Implementation for User Story 2
 
-- [ ] T051 [US2] Implement confidence-note logic in the `RecommendationAgent`: attach a `confidence_note` to a `Recommendation` when a stated tone/setting/theme descriptor has weak or absent support in the candidate's `overview`/`thematic_keywords`, satisfying T050, in `src/streaming_discovery/agents/recommendation_agent.py` (FR-018) (depends on T043)
+- [x] T051 [US2] Implement confidence-note logic in the `RecommendationAgent`: attach a `confidence_note` to a `Recommendation` when a stated tone/setting/theme descriptor has weak or absent support in the candidate's `overview`/`thematic_keywords`, satisfying T050, in `src/streaming_discovery/agents/recommendation_agent.py` (FR-018) (depends on T043) — **already implemented** in T043 during User Story 1 (`_has_weak_tone_evidence` wired into `RecommendationAgent.run`); T048/T049 above are the only genuinely new tests this phase needed
 
-**Checkpoint**: User Stories 1 and 2 both independently functional.
+**Checkpoint**: User Stories 1 and 2 both independently functional. Verified: 84 tests passing, `ruff check`/`ruff format --check` clean.
 
 ---
 
