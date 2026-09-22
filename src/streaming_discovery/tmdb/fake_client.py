@@ -39,12 +39,21 @@ class FakeTmdbClient:
         self,
         *,
         discover_results: dict[str, list[dict]] | None = None,
+        discover_sequence: dict[str, list[list[dict]]] | None = None,
         similar_results: dict[int, list[dict]] | None = None,
         detail_results: dict[int, dict] | None = None,
         title_ids: dict[str, int] | None = None,
         failure_mode: FailureMode | None = None,
     ) -> None:
         self._discover_results = discover_results or {}
+        # discover_sequence supports call-count-sensitive responses (e.g.
+        # zero results on the first discover() call, non-empty on the
+        # second), for exercising the Orchestrator's retry policy
+        # (User Story 4). The last entry in a sequence repeats for any
+        # call beyond its length. Takes precedence over discover_results
+        # for a given media type when both are set.
+        self._discover_sequence = discover_sequence or {}
+        self._discover_call_counts: dict[str, int] = {}
         self._similar_results = similar_results or {}
         self._detail_results = detail_results or {}
         self._title_ids = title_ids or {}
@@ -72,7 +81,14 @@ class FakeTmdbClient:
         result_limit: int,
     ) -> list[dict]:
         self._maybe_fail()
-        return self._discover_results.get(media_type.value, [])[:result_limit]
+        key = media_type.value
+        if key in self._discover_sequence:
+            sequence = self._discover_sequence[key]
+            call_index = self._discover_call_counts.get(key, 0)
+            self._discover_call_counts[key] = call_index + 1
+            result = sequence[min(call_index, len(sequence) - 1)]
+            return result[:result_limit]
+        return self._discover_results.get(key, [])[:result_limit]
 
     async def search_title(self, *, media_type: MediaType, title: str) -> int | None:
         self._maybe_fail()
