@@ -113,7 +113,9 @@ LLM-call retries on outright model failure.
 See `CLAUDE.md` for the full agent-boundary contract table and development
 rules, and `specs/001-streaming-discovery-assistant/contracts/*.md` for
 each agent's complete behavioral guarantees, failure modes, and
-non-responsibilities.
+non-responsibilities. A rendered component diagram and a full request
+sequence diagram (covering both bounded retry paths) live in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Development
 
@@ -129,6 +131,7 @@ the non-negotiable TDD workflow this codebase was built under.
 ## Project docs
 
 - [`CLAUDE.md`](CLAUDE.md) — guidance for implementing this repository: TDD rules, agent boundaries, scope boundaries.
+- [`docs/architecture.md`](docs/architecture.md) — component diagram and full request sequence diagram (both retry paths).
 - [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — the seven governing principles.
 - [`specs/001-streaming-discovery-assistant/spec.md`](specs/001-streaming-discovery-assistant/spec.md) — what's being built and why.
 - [`specs/001-streaming-discovery-assistant/plan.md`](specs/001-streaming-discovery-assistant/plan.md), [`research.md`](specs/001-streaming-discovery-assistant/research.md), [`data-model.md`](specs/001-streaming-discovery-assistant/data-model.md), [`contracts/*.md`](specs/001-streaming-discovery-assistant/contracts/) — how it's built.
