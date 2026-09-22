@@ -9,10 +9,12 @@ built here, only the guided-intake-specific prompts.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from rich.console import Console
 
 from streaming_discovery.agents.orchestrator import Orchestrator
+from streaming_discovery.cli.export import export_session_json, export_session_markdown
 from streaming_discovery.cli.output import (
     InputFunc,
     PrintFunc,
@@ -145,6 +147,30 @@ async def run_guided_cli(
         print_recommendation_package(console, package)
     else:
         print_func(render_package(package))
+
+    await _offer_export(orchestrator, input_func=input_func, print_func=print_func)
+
+
+async def _offer_export(
+    orchestrator: Orchestrator, *, input_func: InputFunc, print_func: PrintFunc
+) -> None:
+    """Ask whether to export the session (FR-024) -- user-initiated,
+    never automatic; skipped on a blank answer.
+    """
+    answer = (
+        input_func("\nExport this session? (json / markdown / press Enter to skip): ")
+        .strip()
+        .lower()
+    )
+    if answer not in ("json", "markdown"):
+        return
+    default_name = "session.json" if answer == "json" else "session.md"
+    path = Path(input_func(f"Save as [{default_name}]: ").strip() or default_name)
+    if answer == "json":
+        export_session_json(orchestrator.session, path)
+    else:
+        export_session_markdown(orchestrator.session, path)
+    print_func(f"Saved to {path}")
 
 
 def main() -> None:
