@@ -234,7 +234,7 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 - [ ] T075 [P] Implement optional session export to JSON and to Markdown (satisfying T074) in `src/streaming_discovery/cli/output.py` (FR-024)
 - [ ] T076 [P] Run the full quickstart.md walkthrough (all 10 scenarios: 1, 1b, 2, 3, 4, 4b, 5, 6, 7, 8) as a documented, watchable demo session and record the transcript/output under `specs/001-streaming-discovery-assistant/` or `docs/`
 - [ ] T077 [P] Write `README.md` covering setup, demo-mode usage (no credentials required), and an architecture overview
-- [ ] T078 [P] Write `CLAUDE.md` with TDD rules, the four agent contract boundaries, and implementation guidance, referencing `.specify/memory/constitution.md`'s principles directly rather than restating them
+- [x] T078 [P] Write `CLAUDE.md` with TDD rules, the four agent contract boundaries, and implementation guidance, referencing `.specify/memory/constitution.md`'s principles directly rather than restating them — **completed ahead of schedule, before Phase 1, at the user's request**, so it can guide implementation from the start rather than only document it afterward; see `/CLAUDE.md`
 - [ ] T079 [P] Add an architecture diagram and a sequence diagram (pipeline + retry path) under `docs/`
 
 ---
