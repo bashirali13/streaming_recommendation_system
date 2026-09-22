@@ -193,15 +193,15 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ### Tests for User Story 5 (write first; must fail before implementation)
 
-- [ ] T063 [P] [US5] E2E test: a mystery-series request excluding "police procedural" and capping season count at three keeps both constraints enforced in the initial search and, when an unrelated soft constraint triggers a retry, in the retried search too, in `tests/e2e/test_exclusion_request.py`, using the quickstart.md scenario 5 fixtures (spec.md US5 Acceptance Scenarios 1–2)
-- [ ] T064 [P] [US5] Unit test: `excluded_genres` and `season_count_max` (once added to `hard_override_fields`) are byte-for-byte identical between the `retry_number=0` and `retry_number=1` `DiscoveryQuery`, in `tests/unit/test_hard_constraints_persist_across_retry.py` (FR-010)
+- [x] T063 [P] [US5] E2E test: a mystery-series request excluding a sub-genre and capping season count at three keeps both constraints enforced in the initial search and, when an unrelated soft constraint triggers a retry, in the retried search too, in `tests/e2e/test_exclusion_request.py`, using the quickstart.md scenario 5 fixtures (spec.md US5 Acceptance Scenarios 1–2). Uses "Crime" rather than the outline's "police procedural" as the excluded genre — TMDB has no official "police procedural" genre, so excluding it would never match any candidate's real TMDB genre and the exclusion assertion would be vacuous.
+- [x] T064 [P] [US5] Unit test: `excluded_genres` and `season_count_max` (once added to `hard_override_fields`) are byte-for-byte identical between the `retry_number=0` and `retry_number=1` `DiscoveryQuery`, in `tests/unit/test_hard_constraints_persist_across_retry.py` (FR-010) — **already satisfied**: `build_discovery_queries` never touched these fields based on `relaxed_constraint`, confirming the design was correct from User Story 4
 
 ### Implementation for User Story 5
 
-- [ ] T065 [US5] Update the `PreferenceAgent` to detect a stated season-count cap and populate `PreferenceProfile.season_count_max`, always adding it to `hard_override_fields` (data-model.md: a stated season cap is never soft), in `src/streaming_discovery/agents/preference_agent.py` (depends on T041)
-- [ ] T066 [US5] Implement the TV season-count hard filter in the `DiscoveryAgent`: since TMDB has no server-side season-count parameter, fetch season-count detail data over the raw pool (not finalist-only) when `season_count_max` is set, per the hard-filter exception documented in contracts/discovery-agent.md, in `src/streaming_discovery/agents/discovery_agent.py` (depends on T042)
+- [x] T065 [US5] Update the `PreferenceAgent` to detect a stated season-count cap and populate `PreferenceProfile.season_count_max`, always adding it to `hard_override_fields` (data-model.md: a stated season cap is never soft), in `src/streaming_discovery/agents/preference_agent.py` (depends on T041) — **already implemented** in T041's `SYSTEM_PROMPT` during User Story 1; added `tests/unit/test_preference_agent_season_count.py` to confirm it, since it had no dedicated test until now
+- [x] T066 [US5] Implement the TV season-count hard filter in the `DiscoveryAgent`: since TMDB has no server-side season-count parameter, fetch season-count detail data over the raw pool (not finalist-only) when `season_count_max` is set, per the hard-filter exception documented in contracts/discovery-agent.md, in `src/streaming_discovery/agents/discovery_agent.py` (depends on T042). No extra fetch was actually needed: every hard-filter survivor already gets a `details()` call for runtime/provider/keyword enrichment, which already includes `number_of_seasons` — this task just added the post-detail comparison against `season_count_max`.
 
-**Checkpoint**: User Stories 1–5 independently functional.
+**Checkpoint**: User Stories 1–5 independently functional. Verified: 100 tests passing, `ruff check`/`ruff format --check` clean.
 
 ---
 
