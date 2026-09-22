@@ -8,7 +8,11 @@ dependencies = [
     "pydantic>=2",
     "pydantic-ai>=2.47.0",
     "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
 ]
+
+[project.scripts]
+streaming-discovery = "streaming_discovery.cli.intake:main"
 
 [dependency-groups]
 dev = [

@@ -4,7 +4,7 @@ the profile, and never returns excluded_genres, media_type, or any
 hard_override_fields entry as relaxable (FR-011, FR-010).
 """
 
-from streaming_discovery.agents.orchestrator import select_relaxation_constraint
+from streaming_discovery.agents.orchestrator import Orchestrator, select_relaxation_constraint
 from streaming_discovery.contracts.enums import MediaType, RelaxableConstraint
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 
@@ -71,3 +71,47 @@ def test_excluded_genres_and_media_type_are_never_returned_as_relaxable():
     # (tone/runtime/year_range) makes returning either structurally
     # impossible, not just a convention.
     assert result is None
+
+
+def _orchestrator() -> Orchestrator:
+    class _Unused:
+        async def run(self, *args, **kwargs):
+            raise NotImplementedError
+
+    return Orchestrator(
+        preference_agent=_Unused(), discovery_agent=_Unused(), region="US", result_limit=20
+    )
+
+
+def test_relaxing_tone_drops_included_genres_from_the_retry_query():
+    """Tone/setting/theme descriptors never reach DiscoveryQuery, so
+    relaxing TONE has to act on the closest DiscoveryQuery-visible proxy
+    for "vibe precision": the genres the Preference Agent inferred.
+    Without this, relaxing tone would be a no-op retry that re-runs the
+    identical query and gets the identical zero result.
+    """
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE, genres=["Thriller"], tone_descriptors=["dark", "moody"]
+    )
+    orchestrator = _orchestrator()
+
+    [initial_query] = orchestrator.build_discovery_queries(profile, retry_number=0)
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
+    )
+
+    assert initial_query.included_genres == ["Thriller"]
+    assert retried_query.included_genres == []
+
+
+def test_relaxing_runtime_or_year_leaves_included_genres_untouched():
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE, genres=["Thriller"], runtime_max_minutes=100
+    )
+    orchestrator = _orchestrator()
+
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
+    )
+
+    assert retried_query.included_genres == ["Thriller"]

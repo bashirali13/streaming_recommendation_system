@@ -1,13 +1,17 @@
-"""Terminal rendering and the free-text CLI entry point for User Story 1.
+"""Terminal rendering, the plain-text confirmation step, and the
+free-text-only CLI flow (`run_cli`) built for User Story 1.
 
-Guided-intake prompts are added in User Story 6 (tasks.md T068); this
-module covers the free-text path plus the confirmation step FR-006
-requires for every request, not only guided intake.
+The unified, Rich-enhanced entry point (an optional free-text prompt
+plus the guided questions, with a real terminal UI) is
+`cli.intake.run_guided_cli` / `cli.intake.main` -- that module imports
+from this one, so the reverse import doesn't happen here, to avoid a
+circular import. `run_cli` and the plain-text `render_package` stay
+here as the simpler, directly-testable content source of truth that
+`cli/rich_ui.py` styles without duplicating.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 
 from streaming_discovery.agents.discovery_agent import DiscoveryAgent
@@ -56,16 +60,25 @@ def _parse_correction(raw: str) -> dict:
 
 
 async def default_confirm(
-    profile, *, input_func: InputFunc = input, print_func: PrintFunc = print
+    profile,
+    *,
+    input_func: InputFunc = input,
+    print_func: PrintFunc = print,
+    render_summary: Callable[[object], None] | None = None,
 ) -> dict | None:
     """Interactive terminal confirmation (FR-006): print the interpreted
     summary, offer a chance to correct it. Returns `None` when the user
     accepts as-is (blank input), or a correction dict otherwise.
     `input_func`/`print_func` are injectable so this is testable without
-    real stdin/stdout.
+    real stdin/stdout. `render_summary`, if given, replaces the default
+    plain-text summary print with a richer one (see cli/rich_ui.py) --
+    the correction-reading logic below is unchanged either way.
     """
-    print_func("\nHere's what I understood:")
-    print_func(build_confirmation_summary(profile))
+    if render_summary is not None:
+        render_summary(profile)
+    else:
+        print_func("\nHere's what I understood:")
+        print_func(build_confirmation_summary(profile))
     answer = input_func(
         "\nPress Enter to continue, or type a correction "
         "(e.g. media_type=tv, providers=Netflix|Hulu): "
@@ -109,7 +122,7 @@ def render_package(package: RecommendationPackage) -> str:
     return "\n".join(lines)
 
 
-def _build_orchestrator(settings: Settings) -> Orchestrator:
+def build_orchestrator(settings: Settings) -> Orchestrator:
     """Production wiring: real TMDB/model clients from `Settings`. Demo
     mode uses fixture-backed fakes instead (wired separately, per NFR-004
     -- see the quickstart.md walkthroughs)."""
@@ -183,13 +196,3 @@ async def run_cli(
         return
 
     print_func(render_package(package))
-
-
-def main() -> None:
-    settings = Settings()
-    orchestrator = _build_orchestrator(settings)
-    asyncio.run(run_cli(orchestrator))
-
-
-if __name__ == "__main__":
-    main()

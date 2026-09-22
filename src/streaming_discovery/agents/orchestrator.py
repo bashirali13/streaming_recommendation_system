@@ -148,26 +148,31 @@ class Orchestrator:
         field (tone/setting/theme) -- those never cross into a
         TMDB-shaped query (contracts/discovery-agent.md).
 
-        NOTE: relaxing `RelaxableConstraint.TONE` has no concrete query-
-        level effect yet, since tone never reaches `DiscoveryQuery` in
-        the first place -- its exact effect (most likely widening
-        `included_genres` when those were tone-derived) is resolved when
-        User Story 4's retry logic is implemented (tasks.md T059-T060),
-        which is also the first caller that will ever pass
-        `relaxed_constraint=TONE` here.
+        Relaxing `RelaxableConstraint.TONE` drops `included_genres`
+        entirely for this attempt: tone/setting/theme descriptors never
+        reach `DiscoveryQuery` in the first place, so `included_genres`
+        (whatever the Preference Agent inferred from the request) is the
+        closest thing to a query-level proxy for "vibe precision" --
+        without this, relaxing tone would be a no-op retry that re-runs
+        an identical query and gets an identical zero result. This does
+        not touch `excluded_genres`, which stays hard regardless of
+        which constraint is relaxed (FR-010).
         """
         year_min, year_max = profile.year_min, profile.year_max
         runtime_max = profile.runtime_max_minutes
+        included_genres = profile.genres
         if relaxed_constraint is RelaxableConstraint.YEAR_RANGE:
             year_min = year_max = None
         if relaxed_constraint is RelaxableConstraint.RUNTIME:
             runtime_max = None
+        if relaxed_constraint is RelaxableConstraint.TONE:
+            included_genres = []
         return [
             DiscoveryQuery(
                 media_type=media_type,
                 provider_names=profile.providers,
                 region=self._region,
-                included_genres=profile.genres,
+                included_genres=included_genres,
                 excluded_genres=profile.excluded_genres,
                 year_min=year_min,
                 year_max=year_max,

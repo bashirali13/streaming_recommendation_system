@@ -8,8 +8,25 @@ built here, only the guided-intake-specific prompts.
 
 from __future__ import annotations
 
+import asyncio
+
+from rich.console import Console
+
 from streaming_discovery.agents.orchestrator import Orchestrator
-from streaming_discovery.cli.output import InputFunc, PrintFunc, default_confirm, render_package
+from streaming_discovery.cli.output import (
+    InputFunc,
+    PrintFunc,
+    build_orchestrator,
+    default_confirm,
+    render_package,
+)
+from streaming_discovery.cli.rich_ui import (
+    build_console,
+    print_confirmation_summary,
+    print_recommendation_package,
+    print_welcome_banner,
+)
+from streaming_discovery.config import Settings
 from streaming_discovery.llm.provider import ModelCallError
 from streaming_discovery.tmdb.client import TmdbAdapterError
 
@@ -70,12 +87,23 @@ async def run_guided_cli(
     *,
     input_func: InputFunc = input,
     print_func: PrintFunc = print,
+    console: Console | None = None,
 ) -> None:
     """The unified guided-discovery entry point: an optional leading
     free-text prompt, then the five guided questions, then the shared
     confirmation step -- surfacing a conflict between the two input
     sources before the user confirms (spec.md Edge Cases).
+
+    `console`, if given, switches the confirmation summary and final
+    recommendation rendering to the styled Rich presentation
+    (cli/rich_ui.py) instead of the plain-text default; `print_func` is
+    still used for the intake prompts/questions either way. Leaving
+    `console` unset (the default) keeps the original plain-text
+    behavior unchanged, so every existing test that doesn't pass one
+    keeps working exactly as before.
     """
+    if console is not None:
+        print_welcome_banner(console)
     print_func(
         "What are you in the mood to watch? "
         "(Press Enter to skip straight to a few guided questions.)"
@@ -89,12 +117,23 @@ async def run_guided_cli(
         print_func(f"\nHeads up: {conflict}. Please resolve this at the confirmation step below.")
 
     async def confirm(profile) -> dict | None:
-        return await default_confirm(profile, input_func=input_func, print_func=print_func)
+        render_summary = (
+            (lambda p: print_confirmation_summary(console, p)) if console is not None else None
+        )
+        return await default_confirm(
+            profile, input_func=input_func, print_func=print_func, render_summary=render_summary
+        )
 
     try:
-        package = await orchestrator.run_single_attempt(
-            raw_user_input=raw_user_input, intake_answers=intake_answers, confirm=confirm
-        )
+        if console is not None:
+            with console.status("[bold blue]Finding something to watch...[/bold blue]"):
+                package = await orchestrator.run_single_attempt(
+                    raw_user_input=raw_user_input, intake_answers=intake_answers, confirm=confirm
+                )
+        else:
+            package = await orchestrator.run_single_attempt(
+                raw_user_input=raw_user_input, intake_answers=intake_answers, confirm=confirm
+            )
     except TmdbAdapterError as exc:
         print_func(f"\nTMDB is currently unavailable: {exc.error.detail}")
         return
@@ -102,4 +141,21 @@ async def run_guided_cli(
         print_func(f"\nThe interpretation step failed: {exc}")
         return
 
-    print_func(render_package(package))
+    if console is not None:
+        print_recommendation_package(console, package)
+    else:
+        print_func(render_package(package))
+
+
+def main() -> None:
+    """The real terminal entry point (`[project.scripts]` in
+    pyproject.toml): the unified guided-discovery flow, with the styled
+    Rich UI.
+    """
+    settings = Settings()
+    orchestrator = build_orchestrator(settings)
+    asyncio.run(run_guided_cli(orchestrator, console=build_console()))
+
+
+if __name__ == "__main__":
+    main()
