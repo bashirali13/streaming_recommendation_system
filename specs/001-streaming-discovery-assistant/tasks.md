@@ -29,11 +29,11 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 **Purpose**: Project initialization — no story-specific code yet.
 
-- [ ] T001 Create the `src/streaming_discovery/` package (with `contracts/`, `agents/`, `tmdb/`, `llm/`, `cli/` subpackages, each with `__init__.py`) and the `tests/` tree (`unit/`, `contract/`, `tmdb_adapter/`, `integration/`, `e2e/`, `adversarial/`, `fixtures/`), matching plan.md's Project Structure exactly
-- [ ] T002 Initialize the Python project in `pyproject.toml`: Python 3.11+ requirement, dependencies `pydantic-ai`, `pydantic>=2`, `pydantic-settings`, `httpx`, dev dependencies `pytest`, `pytest-asyncio`, per research.md §1–4. `pydantic-settings` reads `.env` via its built-in dotenv support — no separate `python-dotenv` dependency needed. `.env` and `.env.example` already exist at the repository root and are not touched by this task.
-- [ ] T003 [P] Configure `ruff` (lint + format) in `pyproject.toml`
-- [ ] T004 [P] Configure `pytest` in `pyproject.toml` (asyncio mode, `tests/` rootdir, markers for `contract`, `unit`, `integration`, `e2e`, `adversarial`)
-- [ ] T005 [P] Add `tests/fixtures/README.md` documenting fixture provenance (recorded TMDB payloads; no live network calls in any automated test, per NFR-004) and the directory layout (`tests/fixtures/tmdb/`, `tests/fixtures/llm/`)
+- [x] T001 Create the `src/streaming_discovery/` package (with `contracts/`, `agents/`, `tmdb/`, `llm/`, `cli/` subpackages, each with `__init__.py`) and the `tests/` tree (`unit/`, `contract/`, `tmdb_adapter/`, `integration/`, `e2e/`, `adversarial/`, `fixtures/`), matching plan.md's Project Structure exactly
+- [x] T002 Initialize the Python project in `pyproject.toml`: Python 3.11+ requirement, dependencies `pydantic-ai`, `pydantic>=2`, `pydantic-settings`, `httpx`, dev dependencies `pytest`, `pytest-asyncio`, per research.md §1–4. `pydantic-settings` reads `.env` via its built-in dotenv support — no separate `python-dotenv` dependency needed. `.env` and `.env.example` already exist at the repository root and are not touched by this task. Managed with `uv` (`uv add` / `uv add --dev`); `.python-version` (3.11) and `uv.lock` are committed for reproducibility.
+- [x] T003 [P] Configure `ruff` (lint + format) in `pyproject.toml`
+- [x] T004 [P] Configure `pytest` in `pyproject.toml` (asyncio mode, `tests/` rootdir, markers for `contract`, `unit`, `integration`, `e2e`, `adversarial`)
+- [x] T005 [P] Add `tests/fixtures/README.md` documenting fixture provenance (recorded TMDB payloads; no live network calls in any automated test, per NFR-004) and the directory layout (`tests/fixtures/tmdb/`, `tests/fixtures/llm/`)
 
 ---
 
