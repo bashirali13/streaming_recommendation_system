@@ -98,3 +98,54 @@ async def test_guided_cli_uses_rich_rendering_when_a_console_is_given():
     assert "Streaming Discovery Assistant" in output  # welcome banner
     assert "Bright Days" in output  # rendered recommendation
     assert "Format" in output  # confirmation summary table
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_guided_cli_status_spinner_is_ascii_safe():
+    """Rich's default "dots" spinner uses non-ASCII Braille glyphs, which
+    crashed real (non-StringIO) runs on a legacy Windows console
+    (cp1252). Regression test: the "Finding something to watch..."
+    status spinner must use an ASCII-safe style.
+    """
+    prompt = build_preference_prompt(None, _INTAKE_ANSWERS)
+    preference_provider = FakeModelProvider(responses={prompt: _PROFILE})
+    recommendation_provider = FakeModelProvider()
+    rationale_prompt = build_rationale_prompt(
+        _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
+    )
+    recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
+        text="Bright Days is an uplifting pick."
+    )
+
+    orchestrator = Orchestrator(
+        preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),
+        discovery_agent=DiscoveryAgent(
+            tmdb_client=FakeTmdbClient(
+                discover_results={"movie": [_RAW_MOVIE]}, detail_results=_DETAILS
+            )
+        ),
+        recommendation_agent=RecommendationAgent(
+            provider=recommendation_provider, max_additional_attempts=2
+        ),
+        region="US",
+        result_limit=20,
+    )
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=False, width=100)
+    captured_kwargs: dict = {}
+    original_status = console.status
+
+    def spy_status(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return original_status(*args, **kwargs)
+
+    console.status = spy_status
+    input_func = _scripted_input(["", "movie", "", "something uplifting", "", "", ""])
+
+    await run_guided_cli(
+        orchestrator, input_func=input_func, print_func=lambda _line: None, console=console
+    )
+
+    assert captured_kwargs.get("spinner") == "line"

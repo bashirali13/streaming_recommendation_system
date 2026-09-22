@@ -128,7 +128,9 @@ async def run_guided_cli(
 
     try:
         if console is not None:
-            with console.status("[bold blue]Finding something to watch...[/bold blue]"):
+            with console.status(
+                "[bold blue]Finding something to watch...[/bold blue]", spinner="line"
+            ):
                 package = await orchestrator.run_single_attempt(
                     raw_user_input=raw_user_input, intake_answers=intake_answers, confirm=confirm
                 )

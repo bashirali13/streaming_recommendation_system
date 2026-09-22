@@ -20,9 +20,9 @@ from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.contracts.recommendation_package import RecommendationPackage
 
 _ROLE_DISPLAY: dict[str, tuple[str, str]] = {
-    "Best Match": ("bold green", "●"),
-    "Safe Pick": ("bold cyan", "●"),
-    "Wildcard Pick": ("bold magenta", "●"),
+    "Best Match": ("bold green", "*"),
+    "Safe Pick": ("bold cyan", "*"),
+    "Wildcard Pick": ("bold magenta", "*"),
 }
 
 # (label, PreferenceProfile attribute, is_list)
