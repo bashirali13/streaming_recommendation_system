@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Exported streaming-discovery sessions (FR-024) -- personal query data
+# from testing the CLI, written to the filenames _offer_export defaults
+# to; not project content.
+session.md
+session.json
