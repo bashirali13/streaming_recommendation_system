@@ -117,13 +117,15 @@ def test_relaxing_runtime_or_year_leaves_included_genres_untouched():
     assert retried_query.included_genres == ["Thriller"]
 
 
-def test_vibe_keywords_are_built_from_setting_and_theme_descriptors_only():
-    """T089 (narrowing T087): tone_descriptors are a fuzzy/subjective mood
-    signal, not the concrete subject matter TMDB's keyword catalog is
-    built around, so they're excluded from the discovery-side keyword
-    filter -- only setting/theme descriptors reach DiscoveryQuery as
-    literal TMDB keyword-search terms. Tone stays fully in play for the
-    Recommendation Agent's soft scoring/rationale (unchanged).
+def test_vibe_keywords_are_built_from_tone_setting_and_theme_descriptors():
+    """T101 (reversing T089, for a materially different, now-safe
+    reason): tone_descriptors are folded back into vibe_keywords,
+    since T100's AND-first/OR-fallback resolution means tone can now
+    only narrow a search anchored by a real theme/setting, never
+    substitute for one via an ungated OR the way it could before --
+    and T092's relevance floor still independently requires a genuine
+    theme_descriptors match to be selectable, regardless of how a
+    candidate entered the pool.
     """
     profile = PreferenceProfile(
         media_type=MediaType.MOVIE,
@@ -135,7 +137,7 @@ def test_vibe_keywords_are_built_from_setting_and_theme_descriptors_only():
 
     [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
 
-    assert query.vibe_keywords == ["European architecture", "fairy tale"]
+    assert query.vibe_keywords == ["quirky humor", "European architecture", "fairy tale"]
 
 
 def test_relaxing_tone_also_drops_vibe_keywords_from_the_retry_query():
@@ -152,7 +154,7 @@ def test_relaxing_tone_also_drops_vibe_keywords_from_the_retry_query():
         profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
     )
 
-    assert initial_query.vibe_keywords == ["heist"]
+    assert initial_query.vibe_keywords == ["dark", "moody", "heist"]
     assert retried_query.vibe_keywords == []
 
 
@@ -175,7 +177,10 @@ def test_excluded_keywords_are_passed_through_and_never_relaxed():
 
 def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
     profile = PreferenceProfile(
-        media_type=MediaType.MOVIE, theme_descriptors=["heist"], runtime_max_minutes=100
+        media_type=MediaType.MOVIE,
+        tone_descriptors=["cozy"],
+        theme_descriptors=["heist"],
+        runtime_max_minutes=100,
     )
     orchestrator = _orchestrator()
 
@@ -183,4 +188,19 @@ def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
         profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
     )
 
-    assert retried_query.vibe_keywords == ["heist"]
+    assert retried_query.vibe_keywords == ["cozy", "heist"]
+
+
+def test_vibe_keywords_carries_tone_alone_when_no_theme_or_setting_is_stated():
+    """A pure-tone-only request ("rainy Sunday afternoon") now actually
+    searches TMDB's keyword catalog instead of only ever seeing whatever
+    TMDB's default popularity sort returns -- with no theme/setting to
+    require, T100's fallback logic naturally uses OR across whatever
+    tone ids resolve.
+    """
+    profile = PreferenceProfile(media_type=MediaType.MOVIE, tone_descriptors=["cozy", "slow"])
+    orchestrator = _orchestrator()
+
+    [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
+
+    assert query.vibe_keywords == ["cozy", "slow"]

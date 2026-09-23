@@ -170,21 +170,27 @@ class Orchestrator:
         """Derive one `DiscoveryQuery` per resolved media type from a
         `PreferenceProfile` (data-model.md: an unresolved `either`/`None`
         format runs one query per attempt for each type, merged by
-        `run_discovery_attempt`). Deliberately excludes every subjective
-        field (tone/setting/theme) -- those never cross into a
-        TMDB-shaped query (contracts/discovery-agent.md).
+        `run_discovery_attempt`). `additional_notes` and free-text
+        correction text never cross into a TMDB-shaped query
+        (contracts/discovery-agent.md) -- that's what keeps this agent
+        out of intent *interpretation*.
 
-        `vibe_keywords` (T087, narrowed by T089) carries
-        `setting_descriptors` and `theme_descriptors` through as literal
-        TMDB keyword-search terms -- not interpretation, just another
-        deterministic TMDB-server-side filter (FR-029), resolved to real
-        keyword ids inside `RealTmdbClient.discover()`. `tone_descriptors`
-        stay excluded: tone is a fuzzy/subjective mood signal, not the
-        concrete subject matter TMDB's keyword catalog is built around,
-        and OR-ing a noisy tone-keyword match in let an otherwise
-        irrelevant candidate satisfy discovery on tone alone. Tone stays
-        fully in play for the Recommendation Agent's soft scoring and
-        rationale, unchanged.
+        `vibe_keywords` (T087, revised by T089 then T101) carries
+        `tone_descriptors`, `setting_descriptors`, and `theme_descriptors`
+        through as literal TMDB keyword-search terms -- not
+        interpretation, just another deterministic TMDB-server-side
+        filter (FR-029), resolved to real keyword ids inside
+        `RealTmdbClient.discover()`. T089 excluded tone here after a live
+        run where OR-ing a noisy tone-keyword match in let an otherwise
+        irrelevant candidate satisfy discovery on tone alone. T101 folds
+        it back in for a materially different, now-safe reason: T100
+        gave `RealTmdbClient.discover()` AND-first/OR-fallback resolution,
+        so tone can now only *narrow* a search anchored by a real
+        theme/setting, never substitute for one the way an ungated OR
+        could -- and even in the fallback-to-OR case, the Recommendation
+        Agent's relevance floor still independently requires a genuine
+        `theme_descriptors` match to be selectable whenever a theme was
+        stated, regardless of how a candidate entered the pool.
 
         Relaxing `RelaxableConstraint.TONE` drops both `vibe_keywords`
         and `included_genres` entirely for this attempt -- without this,
@@ -196,7 +202,11 @@ class Orchestrator:
         year_min, year_max = profile.year_min, profile.year_max
         runtime_max = profile.runtime_max_minutes
         included_genres = profile.genres
-        vibe_keywords = [*profile.setting_descriptors, *profile.theme_descriptors]
+        vibe_keywords = [
+            *profile.tone_descriptors,
+            *profile.setting_descriptors,
+            *profile.theme_descriptors,
+        ]
         if relaxed_constraint is RelaxableConstraint.YEAR_RANGE:
             year_min = year_max = None
         if relaxed_constraint is RelaxableConstraint.RUNTIME:

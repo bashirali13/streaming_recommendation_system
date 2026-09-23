@@ -434,3 +434,124 @@ async def test_discover_omits_without_keywords_when_nothing_resolves():
     )
 
     assert "without_keywords" not in captured_params
+
+
+_MULTI_KEYWORD_RESPONSES = {
+    "road trip": {"results": [{"id": 500, "name": "road trip"}]},
+    "found family": {"results": [{"id": 600, "name": "found family"}]},
+}
+
+
+def _multi_keyword_handler(request: httpx.Request) -> httpx.Response:
+    query = request.url.params.get("query", "")
+    return httpx.Response(200, json=_MULTI_KEYWORD_RESPONSES.get(query, {"results": []}))
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_tries_and_semantics_first_for_multiple_keyword_ids():
+    """T100: a compound request ("road trip and found family") should
+    require all of what was named, not just one -- with_keywords is
+    comma-joined (AND) on the first attempt.
+    """
+    discover_calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _multi_keyword_handler(request)
+        discover_calls.append(dict(request.url.params))
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": [{"id": 1}]})
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=["road trip", "found family"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert len(discover_calls) == 1  # AND succeeded, no fallback needed
+    ids = set(discover_calls[0]["with_keywords"].split(","))
+    assert ids == {"500", "600"}
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_falls_back_to_or_semantics_when_and_finds_nothing():
+    """T100: if requiring every named theme/setting finds literally
+    nothing, retry -- within this same discover() call, invisibly --
+    with OR semantics instead of leaving the user with zero results
+    when a partial match was available.
+    """
+    discover_calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _multi_keyword_handler(request)
+        params = dict(request.url.params)
+        discover_calls.append(params)
+        if "," in params.get("with_keywords", ""):
+            return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": []})
+        return httpx.Response(
+            200, json={"page": 1, "total_pages": 1, "results": [{"id": 1, "title": "Found"}]}
+        )
+
+    client = _client_with_handler(handler)
+
+    results = await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=["road trip", "found family"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert len(discover_calls) == 2  # AND attempt, then the OR fallback
+    ids = set(discover_calls[1]["with_keywords"].split("|"))
+    assert ids == {"500", "600"}
+    assert results == [{"id": 1, "title": "Found"}]
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_uses_a_single_keyword_id_directly_with_no_and_or_fallback():
+    discover_calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _multi_keyword_handler(request)
+        discover_calls.append(dict(request.url.params))
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": []})
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=["road trip"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert len(discover_calls) == 1
+    assert discover_calls[0]["with_keywords"] == "500"

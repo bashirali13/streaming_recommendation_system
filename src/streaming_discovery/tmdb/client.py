@@ -265,10 +265,6 @@ class RealTmdbClient:
             genre_ids = genre_ids_for_names(included_genres, media_type)
             if genre_ids:
                 params["with_genres"] = ",".join(str(gid) for gid in genre_ids)
-        if vibe_keywords:
-            keyword_ids = await self._resolve_keyword_ids(vibe_keywords)
-            if keyword_ids:
-                params["with_keywords"] = "|".join(str(kid) for kid in keyword_ids)
         if excluded_genres:
             excluded_ids = genre_ids_for_names(excluded_genres, media_type)
             if excluded_ids:
@@ -284,7 +280,47 @@ class RealTmdbClient:
         if runtime_max_minutes is not None and media_type is MediaType.MOVIE:
             params["with_runtime.lte"] = str(runtime_max_minutes)
 
+        if vibe_keywords:
+            keyword_ids = await self._resolve_keyword_ids(vibe_keywords)
+            if keyword_ids:
+                return await self._discover_with_keyword_fallback(
+                    endpoint, params, keyword_ids, result_limit=result_limit
+                )
+
         return await self._paginate(endpoint, params, result_limit=result_limit)
+
+    async def _discover_with_keyword_fallback(
+        self,
+        endpoint: str,
+        base_params: dict[str, str],
+        keyword_ids: list[int],
+        *,
+        result_limit: int,
+    ) -> list[dict]:
+        """T100/T101: AND semantics first -- a candidate must match every
+        resolved `vibe_keywords` id (theme, setting, and tone together),
+        since a compound request ("road trip and found family") should
+        require all of what was named, not just one. Falls back to OR
+        (matching any) only if AND finds nothing at all, and only within
+        this one `discover()` call -- TMDB's `with_keywords` supports only
+        one separator per call, so this can't be a single mixed
+        expression, and it never consumes the Orchestrator's one
+        disclosed bounded retry (FR-011), since it isn't a constraint
+        relaxation, just a query-construction detail -- consistent with
+        an unresolved keyword already being dropped silently rather than
+        disclosed (data-model.md).
+        """
+        if len(keyword_ids) == 1:
+            params = {**base_params, "with_keywords": str(keyword_ids[0])}
+            return await self._paginate(endpoint, params, result_limit=result_limit)
+
+        and_params = {**base_params, "with_keywords": ",".join(str(k) for k in keyword_ids)}
+        results = await self._paginate(endpoint, and_params, result_limit=result_limit)
+        if results:
+            return results
+
+        or_params = {**base_params, "with_keywords": "|".join(str(k) for k in keyword_ids)}
+        return await self._paginate(endpoint, or_params, result_limit=result_limit)
 
     async def search_title(self, *, media_type: MediaType, title: str) -> int | None:
         endpoint = "/search/movie" if media_type is MediaType.MOVIE else "/search/tv"
