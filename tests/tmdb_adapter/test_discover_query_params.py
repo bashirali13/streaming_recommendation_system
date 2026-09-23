@@ -52,6 +52,7 @@ async def test_discover_sends_numeric_genre_ids_not_names():
         provider_names=[],
         included_genres=["Comedy"],
         excluded_genres=["Horror"],
+        excluded_keywords=[],
         vibe_keywords=[],
         year_min=None,
         year_max=None,
@@ -82,6 +83,7 @@ async def test_discover_drops_an_unrecognized_genre_name_rather_than_sending_it(
         provider_names=[],
         included_genres=["Not A Real Genre"],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=[],
         year_min=None,
         year_max=None,
@@ -111,6 +113,7 @@ async def test_discover_resolves_provider_names_to_ids_via_the_watch_providers_e
         provider_names=["Netflix", "Prime"],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=[],
         year_min=None,
         year_max=None,
@@ -141,6 +144,7 @@ async def test_discover_apple_tv_resolves_via_substring_match():
         provider_names=["Apple TV"],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=[],
         year_min=None,
         year_max=None,
@@ -175,6 +179,7 @@ async def test_discover_fails_closed_when_no_provider_name_resolves():
         provider_names=["Some Totally Unknown Service"],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=[],
         year_min=None,
         year_max=None,
@@ -207,6 +212,7 @@ async def test_discover_caches_the_provider_list_across_calls():
             provider_names=["Netflix"],
             included_genres=[],
             excluded_genres=[],
+            excluded_keywords=[],
             vibe_keywords=[],
             year_min=None,
             year_max=None,
@@ -222,6 +228,8 @@ _KEYWORD_RESPONSES = {
     "quirky humor": {"results": []},
     "quirky": {"results": [{"id": 200, "name": "quirky"}]},
     "humor": {"results": []},
+    "Marvel": {"results": [{"id": 300, "name": "marvel comic"}]},
+    "DC": {"results": [{"id": 400, "name": "dc comics"}]},
 }
 
 
@@ -249,6 +257,7 @@ async def test_discover_resolves_vibe_keywords_via_the_keyword_search_endpoint()
         provider_names=[],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=["fairy tale"],
         year_min=None,
         year_max=None,
@@ -278,6 +287,7 @@ async def test_discover_falls_back_to_per_word_keyword_search_on_a_phrase_miss()
         provider_names=[],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=["quirky humor"],  # the whole phrase has no match
         year_min=None,
         year_max=None,
@@ -312,6 +322,7 @@ async def test_discover_omits_with_keywords_when_nothing_resolves():
         provider_names=[],
         included_genres=[],
         excluded_genres=[],
+        excluded_keywords=[],
         vibe_keywords=["something nobody has ever tagged"],
         year_min=None,
         year_max=None,
@@ -343,6 +354,7 @@ async def test_discover_caches_keyword_searches_across_calls():
             provider_names=[],
             included_genres=[],
             excluded_genres=[],
+            excluded_keywords=[],
             vibe_keywords=["fairy tale"],
             year_min=None,
             year_max=None,
@@ -351,3 +363,74 @@ async def test_discover_caches_keyword_searches_across_calls():
         )
 
     assert search_count == 1
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_resolves_excluded_keywords_to_without_keywords():
+    """T091: a franchise/studio-level exclusion ("not Marvel or DC")
+    resolves via the same keyword-search mechanism as vibe_keywords, but
+    feeds without_keywords instead of with_keywords.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _keyword_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=["Marvel", "DC"],
+        vibe_keywords=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    ids = set(captured_params["without_keywords"].split("|"))
+    assert ids == {"300", "400"}
+    assert "with_keywords" not in captured_params
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_omits_without_keywords_when_nothing_resolves():
+    """Unlike providers, an unresolved excluded_keywords entry doesn't
+    fail the query closed at this layer -- defense-in-depth text
+    matching (Discovery Agent, Recommendation Agent) is what upholds the
+    hard-exclusion guarantee when TMDB's own keyword tagging can't.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=["Some Obscure Franchise Nobody Tagged"],
+        vibe_keywords=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert "without_keywords" not in captured_params

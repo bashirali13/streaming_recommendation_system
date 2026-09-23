@@ -26,6 +26,13 @@ class TestPreferenceProfileValid:
         assert profile.providers == []
         assert profile.runtime_max_minutes is None
         assert profile.season_count_max is None
+        assert profile.excluded_keywords == []
+
+    def test_excluded_keywords_accepts_a_list(self):
+        profile = PreferenceProfile(
+            theme_descriptors=["superhero"], excluded_keywords=["Marvel", "DC"]
+        )
+        assert profile.excluded_keywords == ["Marvel", "DC"]
 
 
 @pytest.mark.contract

@@ -20,6 +20,7 @@ class PreferenceProfile(BaseModel):
     providers: list[str] = Field(default_factory=list)
     genres: list[str] = Field(default_factory=list)
     excluded_genres: list[str] = Field(default_factory=list)
+    excluded_keywords: list[str] = Field(default_factory=list)
     tone_descriptors: list[str] = Field(default_factory=list)
     setting_descriptors: list[str] = Field(default_factory=list)
     theme_descriptors: list[str] = Field(default_factory=list)

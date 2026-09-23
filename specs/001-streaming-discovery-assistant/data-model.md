@@ -19,7 +19,8 @@ Produced by the Preference Agent (FR-004); consumed by the Orchestrator (to buil
 | `media_type` | `MediaType \| None` | Hard constraint when set; `None` means unspecified, not "either" — FR-003 |
 | `providers` | `list[str]` | Streaming service names as the user named them; hard constraint. Empty list = unspecified |
 | `genres` | `list[str]` | Soft signal |
-| `excluded_genres` | `list[str]` | Hard constraint — never relaxed (FR-010) |
+| `excluded_genres` | `list[str]` | Hard constraint — never relaxed (FR-010); only TMDB's fixed genre vocabulary (see preference_agent.py's system prompt) |
+| `excluded_keywords` | `list[str]` | Hard constraint — never relaxed (FR-010). For an exclusion that isn't one of TMDB's fixed genre names — a franchise, studio, character universe, etc. (e.g. "not Marvel or DC") — captured here instead of `excluded_genres`, and never left only in `additional_notes` (T091), which nothing downstream enforces. Resolved to TMDB keyword ids inside `RealTmdbClient.discover()` via `/search/keyword` and applied as `without_keywords`; also re-checked as a title/overview/thematic_keywords text match in both the Discovery Agent's bulk-item filter and the Recommendation Agent's hard filter, since TMDB's own keyword tagging isn't guaranteed complete for every excluded concept — the text-match layers are what actually uphold "never silently drop a hard constraint" when keyword resolution alone can't |
 | `tone_descriptors` | `list[str]` | Free-text mood/vibe terms (e.g., "dark", "moody"); soft; consumed only by the Recommendation Agent, never by the Discovery Agent (spec Key Entities: DiscoveryQuery) |
 | `setting_descriptors` | `list[str]` | Same treatment as `tone_descriptors`, kept as a distinct field for rationale specificity (spec Assumptions) |
 | `theme_descriptors` | `list[str]` | Same treatment as `tone_descriptors` |
@@ -30,7 +31,7 @@ Produced by the Preference Agent (FR-004); consumed by the Orchestrator (to buil
 | `liked_titles` | `list[str]` | Drives similarity-based discovery (User Story 3) |
 | `disliked_titles` | `list[str]` | Soft negative signal for the Recommendation Agent; exact matches also excluded by the Discovery Agent at pool assembly |
 | `additional_notes` | `str \| None` | Free-form, unparsed remainder; soft, consumed only by the Recommendation Agent's rationale step |
-| `hard_override_fields` | `list[str]` | Usually populated by user choice: names of otherwise-soft fields (`runtime_max_minutes`, `year_min`/`year_max`, `providers`) the user explicitly marked non-negotiable ("it MUST be...", per the outline's "user-designated hard constraints"). One field enters this list automatically rather than by user choice: `season_count_max` is always added here whenever it is set at all (see its own row below) — a stated season cap has no soft form. Fields not listed here keep their default hard/soft classification; `media_type` and `excluded_genres` are always hard and never appear here |
+| `hard_override_fields` | `list[str]` | Usually populated by user choice: names of otherwise-soft fields (`runtime_max_minutes`, `year_min`/`year_max`, `providers`) the user explicitly marked non-negotiable ("it MUST be...", per the outline's "user-designated hard constraints"). One field enters this list automatically rather than by user choice: `season_count_max` is always added here whenever it is set at all (see its own row below) — a stated season cap has no soft form. Fields not listed here keep their default hard/soft classification; `media_type`, `excluded_genres`, and `excluded_keywords` are always hard and never appear here |
 
 **Validation rules**: at least one of `media_type`, `providers`, `genres`, `tone_descriptors`, `setting_descriptors`, `theme_descriptors`, `liked_titles` must be non-empty/non-null (an entirely empty profile cannot proceed to discovery — this is the "blocking clarification" case the Preference Agent's non-responsibility list still requires the Orchestrator to detect). `year_min <= year_max` when both are set.
 
@@ -44,6 +45,7 @@ Derived by the Orchestrator from a `PreferenceProfile` plus retry state; consume
 | `provider_names` | `list[str]` | Passed through from `PreferenceProfile.providers` |
 | `region` | `str` | From configuration (FR-020), not from the user |
 | `included_genres` / `excluded_genres` | `list[str]` | `excluded_genres` is never emptied by relaxation |
+| `excluded_keywords` | `list[str]` | From `PreferenceProfile.excluded_keywords` (T091). Never emptied by relaxation, like `excluded_genres` — always hard |
 | `vibe_keywords` | `list[str]` | From `PreferenceProfile.setting_descriptors + theme_descriptors` (T087; `tone_descriptors` deliberately excluded — T089). Resolved to TMDB keyword ids inside `RealTmdbClient.discover()` via `/search/keyword` — a deterministic external lookup, not model-based interpretation, so this doesn't reintroduce a model call into the Discovery Agent (NFR-008). Soft: an unresolved descriptor is dropped rather than failed closed. Emptied when `relaxed_constraint == tone`, alongside `included_genres`, for the same reason both exist as a proxy for "vibe precision" on the retry |
 | `year_min` / `year_max` | `int \| None` | May be widened only when `relaxed_constraint == year_range` |
 | `runtime_max_minutes` | `int \| None` | Applied server-side for movies; enforced as a post-filter for TV (see `contracts/discovery-agent.md`). May be widened only when `relaxed_constraint == runtime` |
@@ -54,7 +56,7 @@ Derived by the Orchestrator from a `PreferenceProfile` plus retry state; consume
 | `retry_number` | `int` | `0` for the initial attempt, `1` for the (only allowed) retry — FR-011/NFR-007 |
 | `result_limit` | `int` | Bounded page/result cap — NFR-003 |
 
-**Validation rules**: `retry_number` ∈ {0, 1}. `relaxed_constraint` MUST be `None` when `retry_number == 0`, and MUST be set when `retry_number == 1`. `excluded_genres` and `media_type` MUST be identical between the initial and retried query for the same session (hard constraints never change across attempts — FR-010).
+**Validation rules**: `retry_number` ∈ {0, 1}. `relaxed_constraint` MUST be `None` when `retry_number == 0`, and MUST be set when `retry_number == 1`. `excluded_genres`, `excluded_keywords`, and `media_type` MUST be identical between the initial and retried query for the same session (hard constraints never change across attempts — FR-010).
 
 ## CandidateMedia
 

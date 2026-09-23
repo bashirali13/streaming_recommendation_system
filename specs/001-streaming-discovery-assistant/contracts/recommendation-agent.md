@@ -13,7 +13,8 @@
 
 ## Behavioral guarantees (map to spec requirements)
 
-- MUST re-apply all hard filters (format, excluded genres, any `hard_override_fields`) before any soft scoring, even though the Discovery Agent already filtered — this is the ranking-side half of FR-009, protecting against a validation gap upstream rather than duplicating trust in it.
+- MUST re-apply all hard filters (format, excluded genres, `excluded_keywords`, any `hard_override_fields`) before any soft scoring, even though the Discovery Agent already filtered — this is the ranking-side half of FR-009, protecting against a validation gap upstream rather than duplicating trust in it. For `excluded_keywords` specifically (T091), this re-check also covers `thematic_keywords` — enrichment data this agent is the first to see, so it can catch an exclusion the Discovery Agent's own (title/overview-only, pre-enrichment) check couldn't.
+- MUST include `additional_notes` (T090) in the context given to the rationale-writing model call, and flag plainly if a stated exclusion in it conflicts with the candidate — even once `excluded_keywords`/`excluded_genres` give it real structured enforcement, `additional_notes` remains a catch-all for anything a user says that doesn't fit a structured field, and the model should never write a rationale blind to it.
 - MUST score remaining candidates against soft preferences (tone/setting/theme descriptors, liked/disliked titles, recency) and produce a ranked order (FR-014).
 - MUST fill roles in priority order — Best Match first, then Safe Pick, then Wildcard Pick — populating only as many as there are distinct, non-duplicate qualifying candidates; MUST NOT duplicate a candidate across roles or accept a near-duplicate to fill an empty role (FR-015, FR-016, SC-008).
 - MUST write a concise, human-readable rationale per filled role naming key matching and mismatching factors (FR-017).

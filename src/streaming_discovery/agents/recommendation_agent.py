@@ -61,6 +61,21 @@ def build_rationale_prompt(
     return "\n".join(lines)
 
 
+def _mentions_excluded_keyword(profile: PreferenceProfile, candidate: CandidateMedia) -> bool:
+    """T091: final safety net for excluded_keywords (e.g. "Marvel"/"DC"),
+    checking the candidate's title/overview/thematic_keywords -- this
+    can catch a case the Discovery Agent's own bulk-item text check
+    can't, since thematic_keywords is enrichment data only available
+    once this agent receives the candidate, after that earlier check
+    already ran on the un-enriched bulk item.
+    """
+    if not profile.excluded_keywords:
+        return False
+    haystack = " ".join([candidate.title, candidate.overview, *candidate.thematic_keywords])
+    haystack = haystack.lower()
+    return any(term.lower() in haystack for term in profile.excluded_keywords)
+
+
 def _hard_filter(
     profile: PreferenceProfile, candidates: list[CandidateMedia]
 ) -> list[CandidateMedia]:
@@ -77,6 +92,8 @@ def _hard_filter(
         if wrong_media_type:
             continue
         if set(candidate.genres) & set(profile.excluded_genres):
+            continue
+        if _mentions_excluded_keyword(profile, candidate):
             continue
         result.append(candidate)
     return result

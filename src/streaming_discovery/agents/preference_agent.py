@@ -37,6 +37,18 @@ Rules:
   Thriller, TV Movie, War, War & Politics, Western. A descriptive mood
   or vibe that isn't one of these belongs in tone_descriptors/
   setting_descriptors/theme_descriptors instead, never forced into genres.
+- If the user excludes something that is NOT one of those exact genre
+  names -- a franchise, cinematic universe, studio, character, or
+  similar (e.g. "not Marvel or DC", "no Star Wars", "nothing from A24")
+  -- put each excluded thing in excluded_keywords, one item per thing
+  excluded, never in excluded_genres and never only described in
+  additional_notes. An explicit exclusion always belongs in a field a
+  downstream filter can actually enforce.
+- additional_notes is for context that doesn't fit any other field
+  (e.g. "watching with my kids," "on a rainy day") -- never use it as a
+  place to describe an exclusion; excluded_genres/excluded_keywords/
+  disliked_titles exist for that and are the only fields enforced as
+  hard constraints downstream.
 - Do not call any tool, recommend a title, or resolve a conflicting
   request yourself -- describe what was said, even if it seems to
   conflict internally.

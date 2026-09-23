@@ -103,6 +103,7 @@ class TmdbClient(Protocol):
         provider_names: list[str],
         included_genres: list[str],
         excluded_genres: list[str],
+        excluded_keywords: list[str],
         vibe_keywords: list[str],
         year_min: int | None,
         year_max: int | None,
@@ -111,9 +112,10 @@ class TmdbClient(Protocol):
     ) -> list[dict]:
         """Bulk candidate search. Filters are expressed as TMDB query
         parameters wherever TMDB supports them server-side (FR-029) --
-        genre, year range, provider/region, (for movies) runtime, and
-        (T087) tone/setting/theme descriptors resolved to TMDB keyword
-        ids.
+        genre, year range, provider/region, (for movies) runtime, (T087)
+        setting/theme descriptors resolved to TMDB keyword ids, and
+        (T091) excluded_keywords (franchise/studio/etc. exclusions)
+        resolved the same way but applied as an exclusion.
         """
         ...
 
@@ -204,19 +206,24 @@ class RealTmdbClient:
             self._keyword_id_cache[text] = [entry["id"] for entry in payload.get("results", [])]
         return self._keyword_id_cache[text]
 
-    async def _resolve_vibe_keyword_ids(self, vibe_keywords: list[str]) -> list[int]:
-        """One TMDB keyword id per descriptor phrase, at most (T087):
-        search the phrase whole first (TMDB's keyword search already
-        does fuzzy/substring matching); on a miss, fall back to
-        searching its individual words, since a multi-word phrase like
-        "beautiful European architecture" is unlikely to match a TMDB
-        keyword's name exactly but "architecture" alone might. `tone`/
-        `setting`/`theme` descriptors are always soft (data-model.md), so
-        a descriptor with no match at all is simply dropped, not sent
-        through as noise and not treated as a failed hard constraint.
+    async def _resolve_keyword_ids(self, phrases: list[str]) -> list[int]:
+        """One TMDB keyword id per phrase, at most (T087, reused by T091
+        for excluded_keywords): search the phrase whole first (TMDB's
+        keyword search already does fuzzy/substring matching); on a
+        miss, fall back to searching its individual words, since a
+        multi-word phrase like "beautiful European architecture" is
+        unlikely to match a TMDB keyword's name exactly but
+        "architecture" alone might. A phrase with no match at all is
+        simply dropped, not sent through as noise -- for `vibe_keywords`
+        this is correct because setting/theme descriptors are soft
+        (data-model.md); for `excluded_keywords` (hard) it's still
+        correct because dropping it here doesn't drop the exclusion
+        itself, only this one (best-effort) enforcement layer -- the
+        defense-in-depth text-match checks in the Discovery Agent and
+        Recommendation Agent don't depend on this resolution succeeding.
         """
         resolved: list[int] = []
-        for phrase in vibe_keywords:
+        for phrase in phrases:
             ids = await self._search_keyword_ids(phrase)
             if not ids:
                 for word in phrase.split():
@@ -240,6 +247,7 @@ class RealTmdbClient:
         provider_names: list[str],
         included_genres: list[str],
         excluded_genres: list[str],
+        excluded_keywords: list[str],
         vibe_keywords: list[str],
         year_min: int | None,
         year_max: int | None,
@@ -258,13 +266,17 @@ class RealTmdbClient:
             if genre_ids:
                 params["with_genres"] = ",".join(str(gid) for gid in genre_ids)
         if vibe_keywords:
-            keyword_ids = await self._resolve_vibe_keyword_ids(vibe_keywords)
+            keyword_ids = await self._resolve_keyword_ids(vibe_keywords)
             if keyword_ids:
                 params["with_keywords"] = "|".join(str(kid) for kid in keyword_ids)
         if excluded_genres:
             excluded_ids = genre_ids_for_names(excluded_genres, media_type)
             if excluded_ids:
                 params["without_genres"] = ",".join(str(gid) for gid in excluded_ids)
+        if excluded_keywords:
+            excluded_keyword_ids = await self._resolve_keyword_ids(excluded_keywords)
+            if excluded_keyword_ids:
+                params["without_keywords"] = "|".join(str(kid) for kid in excluded_keyword_ids)
         if year_min is not None:
             params[f"{date_field}.gte"] = f"{year_min}-01-01"
         if year_max is not None:

@@ -18,11 +18,17 @@ from streaming_discovery.tmdb.normalize import MOVIE_GENRES, TV_GENRES, normaliz
 def _survives_hard_filter(raw_item: dict, query: DiscoveryQuery) -> bool:
     """Client-side hard filtering, applied to the bulk (un-enriched) item
     *before* spending a detail-level call on it -- exact-match
-    exclude_titles (FR-010), and a defensive excluded_genres re-check
-    using the bulk item's own genre_ids. TMDB's with_genres/
-    without_genres query params already apply this server-side; this is
-    belt-and-suspenders so a detail() call is never wasted on a
-    candidate that was always going to be excluded.
+    exclude_titles (FR-010), a defensive excluded_genres re-check using
+    the bulk item's own genre_ids, and (T091) a defensive
+    excluded_keywords text-match re-check against the item's own
+    title/overview. TMDB's with_genres/without_genres/without_keywords
+    query params already apply these server-side where TMDB's own
+    tagging covers them; this is belt-and-suspenders so a detail() call
+    is never wasted on a candidate that was always going to be excluded
+    -- and, for excluded_keywords specifically, the only enforcement
+    that doesn't depend on TMDB's keyword tagging being complete for the
+    excluded concept (FR-010: a hard exclusion is never silently
+    dropped just because the primary, TMDB-side mechanism missed it).
     """
     title = raw_item.get("title") or raw_item.get("name") or ""
     if title in query.exclude_titles:
@@ -31,6 +37,10 @@ def _survives_hard_filter(raw_item: dict, query: DiscoveryQuery) -> bool:
     genre_names = {genre_table[gid] for gid in raw_item.get("genre_ids", []) if gid in genre_table}
     if genre_names & set(query.excluded_genres):
         return False
+    if query.excluded_keywords:
+        haystack = f"{title} {raw_item.get('overview', '')}".lower()
+        if any(term.lower() in haystack for term in query.excluded_keywords):
+            return False
     return True
 
 
@@ -55,6 +65,7 @@ class DiscoveryAgent:
                     provider_names=query.provider_names,
                     included_genres=query.included_genres,
                     excluded_genres=query.excluded_genres,
+                    excluded_keywords=query.excluded_keywords,
                     vibe_keywords=query.vibe_keywords,
                     year_min=query.year_min,
                     year_max=query.year_max,

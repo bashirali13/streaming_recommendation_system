@@ -156,6 +156,23 @@ def test_relaxing_tone_also_drops_vibe_keywords_from_the_retry_query():
     assert retried_query.vibe_keywords == []
 
 
+def test_excluded_keywords_are_passed_through_and_never_relaxed():
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE,
+        theme_descriptors=["superhero"],
+        excluded_keywords=["Marvel", "DC"],
+    )
+    orchestrator = _orchestrator()
+
+    [initial_query] = orchestrator.build_discovery_queries(profile, retry_number=0)
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
+    )
+
+    assert initial_query.excluded_keywords == ["Marvel", "DC"]
+    assert retried_query.excluded_keywords == ["Marvel", "DC"]
+
+
 def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
     profile = PreferenceProfile(
         media_type=MediaType.MOVIE, theme_descriptors=["heist"], runtime_max_minutes=100

@@ -35,6 +35,19 @@ class TestDiscoveryQueryValid:
         )
         assert query.vibe_keywords == ["fairy tale", "quirky humor"]
 
+    def test_excluded_keywords_defaults_to_empty(self):
+        query = DiscoveryQuery(media_type=MediaType.MOVIE, region="US", retry_number=0)
+        assert query.excluded_keywords == []
+
+    def test_excluded_keywords_accepts_a_list(self):
+        query = DiscoveryQuery(
+            media_type=MediaType.MOVIE,
+            region="US",
+            retry_number=0,
+            excluded_keywords=["Marvel", "DC"],
+        )
+        assert query.excluded_keywords == ["Marvel", "DC"]
+
 
 @pytest.mark.contract
 class TestDiscoveryQueryInvalid:

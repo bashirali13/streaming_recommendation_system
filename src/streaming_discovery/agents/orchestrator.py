@@ -211,6 +211,7 @@ class Orchestrator:
                 region=self._region,
                 included_genres=included_genres,
                 excluded_genres=profile.excluded_genres,
+                excluded_keywords=profile.excluded_keywords,
                 vibe_keywords=vibe_keywords,
                 year_min=year_min,
                 year_max=year_max,

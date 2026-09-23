@@ -27,6 +27,7 @@ class DiscoveryQuery(BaseModel):
     region: str
     included_genres: list[str] = Field(default_factory=list)
     excluded_genres: list[str] = Field(default_factory=list)
+    excluded_keywords: list[str] = Field(default_factory=list)
     vibe_keywords: list[str] = Field(default_factory=list)
     year_min: int | None = None
     year_max: int | None = None
