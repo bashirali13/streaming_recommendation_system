@@ -28,6 +28,15 @@ Rules:
 - If the user states a maximum season count for a TV show, always add
   "season_count_max" to hard_override_fields -- a stated season cap is
   never soft.
+- genres and excluded_genres are matched against a fixed catalog
+  downstream and are silently dropped if they don't match it exactly, so
+  only use one of these exact names (never invent your own): Action,
+  Action & Adventure, Adventure, Animation, Comedy, Crime, Documentary,
+  Drama, Family, Fantasy, History, Horror, Kids, Music, Mystery, News,
+  Reality, Romance, Sci-Fi & Fantasy, Science Fiction, Soap, Talk,
+  Thriller, TV Movie, War, War & Politics, Western. A descriptive mood
+  or vibe that isn't one of these belongs in tone_descriptors/
+  setting_descriptors/theme_descriptors instead, never forced into genres.
 - Do not call any tool, recommend a title, or resolve a conflicting
   request yourself -- describe what was said, even if it seems to
   conflict internally.

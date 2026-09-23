@@ -6,7 +6,7 @@ and correctly scopes provider data to one region + flatrate offers only
 import pytest
 
 from streaming_discovery.contracts.enums import MediaType
-from streaming_discovery.tmdb.normalize import normalize_candidate
+from streaming_discovery.tmdb.normalize import genre_ids_for_names, normalize_candidate
 
 _RAW_MOVIE_LIST_ITEM = {
     "id": 550,
@@ -110,3 +110,31 @@ def test_normalize_with_enrichment_populates_runtime_and_keywords():
 
     assert candidate.runtime_minutes == 139
     assert candidate.thematic_keywords == ["insomnia"]
+
+
+@pytest.mark.tmdb_adapter
+class TestGenreIdsForNames:
+    """T086: TMDB's discover endpoint requires numeric genre ids for
+    with_genres/without_genres, not names -- these resolve against the
+    same static genre tables normalize_candidate already uses in the
+    other direction (id -> name), so the two stay in sync by
+    construction.
+    """
+
+    def test_resolves_known_movie_genre_names_case_insensitively(self):
+        ids = genre_ids_for_names(["comedy", "Science Fiction"], MediaType.MOVIE)
+
+        assert sorted(ids) == sorted([35, 878])
+
+    def test_resolves_known_tv_genre_names(self):
+        ids = genre_ids_for_names(["Sci-Fi & Fantasy"], MediaType.TV)
+
+        assert ids == [10765]
+
+    def test_unknown_genre_name_is_dropped_not_erroring(self):
+        ids = genre_ids_for_names(["Comedy", "Not A Real Genre"], MediaType.MOVIE)
+
+        assert ids == [35]
+
+    def test_empty_input_returns_empty_list(self):
+        assert genre_ids_for_names([], MediaType.MOVIE) == []

@@ -21,6 +21,7 @@ import httpx
 
 from streaming_discovery.contracts.candidate_pool import TmdbErrorInfo
 from streaming_discovery.contracts.enums import MediaType
+from streaming_discovery.tmdb.normalize import genre_ids_for_names
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -29,6 +30,39 @@ MAX_PAGES_PER_CALL = 10
 result_limit -- a second, defensive guard against unbounded pagination
 (NFR-003) if result_limit is ever misconfigured to something very large.
 """
+
+_IMPOSSIBLE_PROVIDER_ID = -1
+"""Sent as `with_watch_providers` when none of a non-empty
+`provider_names` list resolves to a real TMDB provider id (T086).
+`providers` is always a hard constraint (FR-010): a name TMDB can't be
+asked about must make the query fail closed (guaranteed zero results),
+never silently drop the filter and search every provider instead.
+"""
+
+
+def _match_provider(name: str, table: dict[str, int]) -> int | None:
+    """Resolve one user/LLM-given provider name against TMDB's live
+    provider list (T086). Exact case-insensitive match first -- "Apple
+    TV" and "Apple TV Plus" are two distinct real TMDB providers, so an
+    exact hit must win outright. Falls back to a substring match (either
+    direction) so a casual name like "Prime" still resolves to "Amazon
+    Prime Video"; among substring matches, the shortest provider name is
+    preferred as the more likely canonical entry over a niche bundled-
+    channel variant.
+    """
+    lowered = name.lower()
+    for provider_name, provider_id in table.items():
+        if provider_name.lower() == lowered:
+            return provider_id
+    candidates = [
+        (provider_name, provider_id)
+        for provider_name, provider_id in table.items()
+        if lowered in provider_name.lower() or provider_name.lower() in lowered
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: len(pair[0]))
+    return candidates[0][1]
 
 
 class TmdbAdapterError(Exception):
@@ -115,9 +149,35 @@ class RealTmdbClient:
 
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self._http = http_client
+        self._provider_table_cache: dict[tuple[MediaType, str], dict[str, int]] = {}
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    async def _provider_table(self, media_type: MediaType, region: str) -> dict[str, int]:
+        """Provider name -> id, fetched from TMDB's own provider list and
+        cached per (media_type, region) for this client's lifetime (T086)
+        -- one extra call per session at most, not one per discover() call.
+        """
+        cache_key = (media_type, region)
+        if cache_key not in self._provider_table_cache:
+            prefix = "movie" if media_type is MediaType.MOVIE else "tv"
+            payload = await self._get_json(f"/watch/providers/{prefix}", {"watch_region": region})
+            self._provider_table_cache[cache_key] = {
+                entry["provider_name"]: entry["provider_id"] for entry in payload.get("results", [])
+            }
+        return self._provider_table_cache[cache_key]
+
+    async def _resolve_provider_ids(
+        self, provider_names: list[str], media_type: MediaType, region: str
+    ) -> list[int]:
+        table = await self._provider_table(media_type, region)
+        resolved = [
+            pid
+            for pid in (_match_provider(name, table) for name in provider_names)
+            if pid is not None
+        ]
+        return resolved or [_IMPOSSIBLE_PROVIDER_ID]
 
     async def discover(
         self,
@@ -137,15 +197,16 @@ class RealTmdbClient:
 
         params: dict[str, str] = {"watch_region": region}
         if provider_names:
-            # NOTE: TMDB's with_watch_providers expects numeric provider ids,
-            # not names. Passing names through is a placeholder until
-            # provider-name -> id resolution is added alongside the
-            # Discovery Agent's provider-filtering wiring (tasks.md T042).
-            params["with_watch_providers"] = "|".join(provider_names)
+            provider_ids = await self._resolve_provider_ids(provider_names, media_type, region)
+            params["with_watch_providers"] = "|".join(str(pid) for pid in provider_ids)
         if included_genres:
-            params["with_genres"] = ",".join(included_genres)
+            genre_ids = genre_ids_for_names(included_genres, media_type)
+            if genre_ids:
+                params["with_genres"] = ",".join(str(gid) for gid in genre_ids)
         if excluded_genres:
-            params["without_genres"] = ",".join(excluded_genres)
+            excluded_ids = genre_ids_for_names(excluded_genres, media_type)
+            if excluded_ids:
+                params["without_genres"] = ",".join(str(gid) for gid in excluded_ids)
         if year_min is not None:
             params[f"{date_field}.gte"] = f"{year_min}-01-01"
         if year_max is not None:

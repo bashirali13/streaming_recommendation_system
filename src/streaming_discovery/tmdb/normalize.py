@@ -65,6 +65,19 @@ def _genre_names(genre_ids: list[int], media_type: MediaType) -> list[str]:
     return [table[gid] for gid in genre_ids if gid in table]
 
 
+def genre_ids_for_names(genre_names: list[str], media_type: MediaType) -> list[int]:
+    """The inverse of `_genre_names` (T086): TMDB's discover endpoint
+    requires numeric genre ids for `with_genres`/`without_genres`, not
+    names -- resolved here, case-insensitively, against the same static
+    table `_genre_names` uses, so the two directions can never drift
+    apart. A name that isn't one of TMDB's known genres for this media
+    type is dropped rather than sent through as meaningless noise.
+    """
+    table = MOVIE_GENRES if media_type is MediaType.MOVIE else TV_GENRES
+    name_to_id = {name.lower(): gid for gid, name in table.items()}
+    return [name_to_id[name.lower()] for name in genre_names if name.lower() in name_to_id]
+
+
 def _release_year(raw: dict, media_type: MediaType) -> int | None:
     date_field = "release_date" if media_type is MediaType.MOVIE else "first_air_date"
     date_value = raw.get(date_field)
