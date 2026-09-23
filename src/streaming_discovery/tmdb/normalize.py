@@ -105,6 +105,19 @@ def _thematic_keywords(raw: dict, media_type: MediaType) -> list[str]:
     return [entry["name"] for entry in keywords_payload.get(key, [])]
 
 
+def _collection_id(raw: dict, media_type: MediaType) -> int | None:
+    """TMDB collections are a movie-only concept -- no `/tv/{id}` field
+    is an equivalent (T105), so this is always None for TV. Already
+    present on the base `/movie/{id}` details response (confirmed
+    live), unlike keywords/watch-providers, which need
+    `append_to_response`.
+    """
+    if media_type is not MediaType.MOVIE:
+        return None
+    collection = raw.get("belongs_to_collection")
+    return collection["id"] if collection else None
+
+
 def normalize_candidate(
     raw: dict,
     *,
@@ -144,6 +157,7 @@ def normalize_candidate(
             season_count=raw.get("number_of_seasons"),
             provider_names=_flatrate_provider_names(raw, region),
             thematic_keywords=_thematic_keywords(raw, media_type),
+            collection_id=_collection_id(raw, media_type),
         )
 
     return CandidateMedia(**fields)

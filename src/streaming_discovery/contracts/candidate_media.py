@@ -37,6 +37,14 @@ class CandidateMedia(BaseModel):
     """Enrichment field: flatrate-only, configured-region-only (FR-019)."""
     thematic_keywords: list[str] = Field(default_factory=list)
     """Enrichment field: populated only for candidates reaching ranking."""
+    collection_id: int | None = None
+    """Enrichment field, movie-only (TMDB collections have no TV
+    equivalent): TMDB's `belongs_to_collection.id`, populated only for
+    candidates reaching ranking. Consumer: `RecommendationAgent`'s
+    dedup step (FR-016 -- "MUST NOT assign ... a direct sequel/prequel/
+    alternate-cut of an already-selected title" to more than one role),
+    since near-duplicate *title* matching alone can't catch two
+    differently-titled entries in the same franchise (T105)."""
 
     @model_validator(mode="after")
     def _media_type_is_resolved(self) -> CandidateMedia:

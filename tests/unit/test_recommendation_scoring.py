@@ -197,3 +197,32 @@ class TestDeduplicate:
         result = _deduplicate(ranked)
 
         assert [c.tmdb_id for c in result] == [1, 3]
+
+    def test_a_direct_sequel_in_the_same_collection_is_treated_as_a_near_duplicate(self):
+        """T105/FR-016: "the same title, or a direct sequel/prequel/
+        alternate-cut of an already-selected title" -- exact-title
+        matching alone can't catch two differently-titled entries in
+        the same franchise (e.g. "The Bad Guys" and "The Bad Guys 2",
+        both real TMDB titles sharing one real `collection_id`)."""
+        ranked = [
+            _candidate(tmdb_id=1, title="The Bad Guys 2", vote_average=8.0, collection_id=1231053),
+            _candidate(tmdb_id=2, title="The Bad Guys", vote_average=7.5, collection_id=1231053),
+            _candidate(tmdb_id=3, title="Chicken Run", vote_average=7.0, collection_id=None),
+        ]
+
+        result = _deduplicate(ranked)
+
+        assert [c.tmdb_id for c in result] == [1, 3]
+
+    def test_candidates_with_no_collection_are_never_treated_as_duplicates_of_each_other(self):
+        """collection_id is None for the vast majority of titles
+        (standalone films, and always for TV) -- two unrelated None
+        values must never collapse into a false-positive duplicate."""
+        ranked = [
+            _candidate(tmdb_id=1, title="First", vote_average=8.0, collection_id=None),
+            _candidate(tmdb_id=2, title="Second", vote_average=7.0, collection_id=None),
+        ]
+
+        result = _deduplicate(ranked)
+
+        assert [c.tmdb_id for c in result] == [1, 2]

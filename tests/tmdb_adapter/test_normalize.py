@@ -52,6 +52,18 @@ _RAW_MOVIE_DETAILS = {
     "keywords": {"keywords": [{"id": 818, "name": "insomnia"}]},
 }
 
+_RAW_SEQUEL_DETAILS = {
+    **_RAW_MOVIE_DETAILS,
+    "id": 551,
+    "title": "Fight Club 2",
+    "belongs_to_collection": {
+        "id": 999,
+        "name": "Fight Club Collection",
+        "poster_path": None,
+        "backdrop_path": None,
+    },
+}
+
 _EXCLUDED_FIELD_NAMES = {
     "genre_ids",
     "popularity",
@@ -100,6 +112,7 @@ def test_normalize_without_enrichment_leaves_enrichment_fields_unset():
     assert candidate.runtime_minutes is None
     assert candidate.provider_names == []
     assert candidate.thematic_keywords == []
+    assert candidate.collection_id is None
 
 
 @pytest.mark.tmdb_adapter
@@ -110,6 +123,51 @@ def test_normalize_with_enrichment_populates_runtime_and_keywords():
 
     assert candidate.runtime_minutes == 139
     assert candidate.thematic_keywords == ["insomnia"]
+
+
+@pytest.mark.tmdb_adapter
+def test_normalize_leaves_collection_id_unset_when_not_part_of_a_collection():
+    """`belongs_to_collection` is `None` on TMDB's own response for a
+    standalone movie (T105) -- must not be confused with "not yet
+    enriched"."""
+    candidate = normalize_candidate(
+        _RAW_MOVIE_DETAILS, media_type=MediaType.MOVIE, region="US", include_enrichment=True
+    )
+
+    assert candidate.collection_id is None
+
+
+@pytest.mark.tmdb_adapter
+def test_normalize_populates_collection_id_for_a_franchise_entry():
+    """T105: `belongs_to_collection` is already present on TMDB's base
+    `/movie/{id}` details response (confirmed live) -- no extra API call
+    needed, just extraction, unlike keywords/watch-providers which
+    require `append_to_response`."""
+    candidate = normalize_candidate(
+        _RAW_SEQUEL_DETAILS, media_type=MediaType.MOVIE, region="US", include_enrichment=True
+    )
+
+    assert candidate.collection_id == 999
+
+
+@pytest.mark.tmdb_adapter
+def test_normalize_tv_item_never_has_a_collection_id():
+    """TMDB collections are a movie-only concept -- no `/tv/{id}` field
+    provides an equivalent, so this must always be None for TV
+    regardless of enrichment."""
+    raw_tv = {
+        "id": 700,
+        "name": "Some Show",
+        "overview": "n/a",
+        "genre_ids": [],
+        "first_air_date": "2020-01-01",
+        "vote_average": 7.0,
+    }
+    candidate = normalize_candidate(
+        raw_tv, media_type=MediaType.TV, region="US", include_enrichment=True
+    )
+
+    assert candidate.collection_id is None
 
 
 @pytest.mark.tmdb_adapter

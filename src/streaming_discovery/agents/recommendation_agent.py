@@ -243,7 +243,19 @@ def _has_weak_tone_evidence(profile: PreferenceProfile, candidate: CandidateMedi
 
 
 def _is_near_duplicate(a: CandidateMedia, b: CandidateMedia) -> bool:
-    return a.title.strip().lower() == b.title.strip().lower()
+    """FR-016: "the same title, or a direct sequel/prequel/alternate-cut
+    of an already-selected title." Exact-title matching alone can't
+    catch the second half of that -- "The Bad Guys" and "The Bad Guys
+    2" are two differently-titled entries in one real TMDB collection
+    (T105) -- so a shared, non-None `collection_id` counts as a
+    near-duplicate too. `None == None` is deliberately excluded: most
+    titles (and all TV) have no collection at all, and two unrelated
+    standalone titles must never collapse into a false-positive
+    duplicate just because neither belongs to a franchise.
+    """
+    if a.title.strip().lower() == b.title.strip().lower():
+        return True
+    return a.collection_id is not None and a.collection_id == b.collection_id
 
 
 def _deduplicate(ranked_candidates: list[CandidateMedia]) -> list[CandidateMedia]:

@@ -76,6 +76,7 @@ Produced by the Discovery Agent from normalized TMDB data (FR-008); consumed by 
 | `season_count` | `int \| None` | TV-only. Same treatment as `runtime_minutes`: a display/ranking enrichment field normally, but fetched over the raw pool for hard filtering when `season_count_max` is a stated hard constraint (User Story 5) |
 | `provider_names` | `list[str]` | **Enrichment field** — flatrate-only, configured region only (FR-019); populated only for candidates reaching ranking |
 | `thematic_keywords` | `list[str]` | **Enrichment field** — populated only for candidates reaching ranking |
+| `collection_id` | `int \| None` | **Enrichment field**, movie-only (TMDB collections have no TV equivalent) — TMDB `belongs_to_collection.id` (T105), already present on the base `/movie/{id}` response (no `append_to_response` needed). Consumer: `RecommendationAgent`'s dedup step (FR-016 — "the same title, or a direct sequel/prequel/alternate-cut"), since exact-title matching alone can't catch two differently-titled entries in the same franchise |
 
 **Validation rules**: `vote_average` in `[0.0, 10.0]`. A candidate missing a value needed to satisfy a *hard* constraint (e.g., no runtime data when runtime is user-designated hard) is excluded from the pool rather than assumed to pass (spec Edge Cases).
 
