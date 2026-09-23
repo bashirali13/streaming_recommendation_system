@@ -76,6 +76,21 @@ class RecommendationAgentLike(Protocol):
 
 ConfirmCallback = Callable[[PreferenceProfile], Awaitable[dict | None]]
 
+# T084: a purely-informational progress hook -- calling it makes no
+# decision and calls no model itself, so it doesn't touch the
+# Orchestrator's "no model call" boundary (constitution Principle II).
+# It exists so a caller (the CLI) can show which pipeline phase is
+# currently running instead of one static message for the whole run.
+StepCallback = Callable[[str], None]
+
+STEP_INTERPRETING = "Interpreting your request"
+STEP_SEARCHING_TMDB = "Searching TMDB"
+STEP_CURATING_PICKS = "Curating your three picks"
+
+
+def _retry_step_message(relaxed: RelaxableConstraint) -> str:
+    return f"No matches yet -- retrying with {relaxed.value} relaxed"
+
 
 class Orchestrator:
     """Sequences the Preference, Discovery, and Recommendation agents for
@@ -236,16 +251,26 @@ class Orchestrator:
         raw_user_input: str | None,
         intake_answers: dict[str, str | None] | None = None,
         confirm: ConfirmCallback | None = None,
+        on_step: StepCallback | None = None,
     ) -> RecommendationPackage:
         """The full pipeline (Preference -> confirmation -> Discovery,
         with the one allowed zero-result retry -> Recommendation), per
         contracts/orchestrator.md and FR-011/FR-012. Also (re)builds
         `self.session` (FR-023, FR-024) as it progresses.
+
+        `on_step`, if given, is called with a short phase description
+        (T084) right before each major phase starts -- interpreting,
+        searching TMDB, retrying (naming the relaxed constraint), and
+        curating -- so a caller can show live progress. It is never
+        called for a phase the pipeline doesn't reach (e.g. curating,
+        when there's no match).
         """
         self.session = UserSessionState(
             raw_user_input=raw_user_input, intake_answers=intake_answers or {}
         )
 
+        if on_step is not None:
+            on_step(STEP_INTERPRETING)
         profile = await self.interpret_preferences(
             raw_user_input=raw_user_input, intake_answers=intake_answers
         )
@@ -255,6 +280,8 @@ class Orchestrator:
                 profile = apply_correction(profile, correction)
         self.session.preference_profile = profile
 
+        if on_step is not None:
+            on_step(STEP_SEARCHING_TMDB)
         queries = self.build_discovery_queries(profile, retry_number=0)
         pool = await self.run_discovery_attempt(queries)
         self.session.discovery_attempts.append(pool)
@@ -269,6 +296,8 @@ class Orchestrator:
             relaxed = select_relaxation_constraint(profile)
             if relaxed is not None:
                 logger.info("orchestrator: zero candidates, retrying with %s relaxed", relaxed)
+                if on_step is not None:
+                    on_step(_retry_step_message(relaxed))
                 retry_queries = self.build_discovery_queries(
                     profile, retry_number=1, relaxed_constraint=relaxed
                 )
@@ -293,6 +322,8 @@ class Orchestrator:
                 self.session.recommendation_package = package
                 return package
 
+        if on_step is not None:
+            on_step(STEP_CURATING_PICKS)
         package = await self.recommend(profile, pool)
         self.session.recommendation_package = package
         return package

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from streaming_discovery.agents.orchestrator import Orchestrator
+from streaming_discovery.agents.orchestrator import STEP_INTERPRETING, Orchestrator
 from streaming_discovery.cli.export import export_session_json, export_session_markdown
 from streaming_discovery.cli.output import (
     InputFunc,
@@ -215,11 +215,17 @@ async def run_guided_cli(
 
     try:
         if console is not None:
-            with console.status(
-                "[bold blue]Finding something to watch...[/bold blue]", spinner="line"
-            ):
+            initial_status = f"[bold blue]{STEP_INTERPRETING}...[/bold blue]"
+            with console.status(initial_status, spinner="line") as status:
+
+                def on_step(step: str, _status=status) -> None:
+                    _status.update(f"[bold blue]{step}...[/bold blue]")
+
                 package = await orchestrator.run_single_attempt(
-                    raw_user_input=raw_user_input, intake_answers=intake_answers, confirm=confirm
+                    raw_user_input=raw_user_input,
+                    intake_answers=intake_answers,
+                    confirm=confirm,
+                    on_step=on_step,
                 )
         else:
             package = await orchestrator.run_single_attempt(

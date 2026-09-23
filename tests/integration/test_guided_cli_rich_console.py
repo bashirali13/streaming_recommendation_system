@@ -9,6 +9,7 @@ import io
 
 import pytest
 from rich.console import Console
+from rich.status import Status
 
 from streaming_discovery.agents.discovery_agent import DiscoveryAgent
 from streaming_discovery.agents.orchestrator import Orchestrator
@@ -149,3 +150,56 @@ async def test_guided_cli_status_spinner_is_ascii_safe():
     )
 
     assert captured_kwargs.get("spinner") == "line"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_guided_cli_status_text_updates_per_pipeline_phase(monkeypatch):
+    """T084: the status indicator shows which phase is currently
+    running (interpreting, searching TMDB, curating) instead of one
+    static message for the whole pipeline.
+    """
+    prompt = build_preference_prompt(None, _INTAKE_ANSWERS)
+    preference_provider = FakeModelProvider(responses={prompt: _PROFILE})
+    recommendation_provider = FakeModelProvider()
+    rationale_prompt = build_rationale_prompt(
+        _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
+    )
+    recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
+        text="Bright Days is an uplifting pick."
+    )
+
+    orchestrator = Orchestrator(
+        preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),
+        discovery_agent=DiscoveryAgent(
+            tmdb_client=FakeTmdbClient(
+                discover_results={"movie": [_RAW_MOVIE]}, detail_results=_DETAILS
+            )
+        ),
+        recommendation_agent=RecommendationAgent(
+            provider=recommendation_provider, max_additional_attempts=2
+        ),
+        region="US",
+        result_limit=20,
+    )
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=False, width=100)
+    captured_updates: list[str] = []
+    original_update = Status.update
+
+    def spy_update(self, status=None, **kwargs):
+        if status is not None:
+            captured_updates.append(str(status))
+        return original_update(self, status, **kwargs)
+
+    monkeypatch.setattr(Status, "update", spy_update)
+    input_func = _scripted_input(["", "movie", "", "something uplifting", "", "", ""])
+
+    await run_guided_cli(
+        orchestrator, input_func=input_func, print_func=lambda _line: None, console=console
+    )
+
+    assert any("Interpreting" in u for u in captured_updates)
+    assert any("Searching TMDB" in u for u in captured_updates)
+    assert any("Curating" in u for u in captured_updates)
