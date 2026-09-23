@@ -99,6 +99,29 @@ def _hard_filter(
     return result
 
 
+def _meets_relevance_floor(profile: PreferenceProfile, candidate: CandidateMedia) -> bool:
+    """T092: a candidate must reflect at least one stated theme
+    descriptor to be selectable at all, not merely ranked lower --
+    closing the gap where a thin, hard-filter-surviving pool got
+    force-filled up to 3 picks regardless of relevance (a "hopeful,
+    superhero" request's Wildcard Pick was a romance with zero
+    superhero relevance, because nothing gated on it). Only gates when
+    `theme_descriptors` were actually stated, and only on theme --
+    `tone_descriptors` (T089's reasoning: fuzzy mood, not concrete
+    subject matter) and `setting_descriptors` are both deliberately
+    excluded from this floor, since spec.md User Story 2's own
+    acceptance criteria require a vague, tone/setting-only request to
+    still surface a weakly-evidenced pick with an honest
+    `confidence_note` rather than drop it -- `theme_descriptors` is a
+    starker, more binary "is this even about the right kind of story"
+    signal than setting ever is, which is why only it gates outright.
+    """
+    if not profile.theme_descriptors:
+        return True
+    haystack = " ".join([candidate.overview, *candidate.thematic_keywords]).lower()
+    return any(d.lower() in haystack for d in profile.theme_descriptors)
+
+
 def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
     score = candidate.vote_average
     score += 2.0 * len(set(profile.genres) & set(candidate.genres))
@@ -176,6 +199,7 @@ class RecommendationAgent:
 
     async def run(self, profile: PreferenceProfile, pool: CandidatePool) -> RecommendationPackage:
         qualifying = _hard_filter(profile, pool.candidates)
+        qualifying = [c for c in qualifying if _meets_relevance_floor(profile, c)]
         ranked = sorted(qualifying, key=lambda c: _soft_score(profile, c), reverse=True)
         selected = _deduplicate(ranked)[:3]
 

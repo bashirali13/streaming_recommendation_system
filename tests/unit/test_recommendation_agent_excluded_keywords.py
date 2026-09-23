@@ -49,7 +49,7 @@ async def test_candidate_with_no_excluded_keyword_match_is_not_rejected_by_this_
     candidate = _candidate(
         tmdb_id=2,
         title="My Hero Academia: Heroes Rising",
-        overview="Young heroes protect an island.",
+        overview="Young superhero students protect an island.",
         thematic_keywords=["anime", "school"],
     )
     pool = CandidatePool(candidates=[candidate], retry_number=0)
@@ -60,7 +60,7 @@ async def test_candidate_with_no_excluded_keyword_match_is_not_rejected_by_this_
     )
 
     rationale_prompt = build_rationale_prompt(
-        profile, title=candidate.title, overview=candidate.overview, weak_evidence=True
+        profile, title=candidate.title, overview=candidate.overview, weak_evidence=False
     )
     provider._responses[rationale_prompt] = _RationaleOutput(text="A good match.")
     agent = RecommendationAgent(provider=provider, max_additional_attempts=2)
