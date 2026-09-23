@@ -198,6 +198,7 @@ class RealTmdbClient:
         self._provider_table_cache: dict[tuple[MediaType, str], dict[str, int]] = {}
         self._keyword_id_cache: dict[str, list[int]] = {}
         self._language_table_cache: dict[str, str] | None = None
+        self._company_id_cache: dict[str, int | None] = {}
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -271,6 +272,33 @@ class RealTmdbClient:
                 break
         return resolved
 
+    async def _search_company_id(self, text: str) -> int | None:
+        """TMDB company ids matching a free-text search, cached per exact
+        query string for this client's lifetime (T106, mirroring
+        `_search_keyword_ids`). Takes TMDB's own relevance ranking as-is
+        (the first result, if any) -- confirmed live this is usually the
+        expected entity ("Marvel" -> "Marvel Studios", "DC" -> "DC"), but
+        not always ("Disney" ranks a regional office above the actual
+        studio). An imperfect or unresolved company match here is not a
+        lost exclusion: `without_keywords` and the detail-call
+        `production_companies` text-match check (T095) already
+        independently enforce the exclusion regardless of whether this
+        discover-time optimization resolves to the ideal entity.
+        """
+        if text not in self._company_id_cache:
+            payload = await self._get_json("/search/company", {"query": text})
+            results = payload.get("results", [])
+            self._company_id_cache[text] = results[0]["id"] if results else None
+        return self._company_id_cache[text]
+
+    async def _resolve_company_ids(self, phrases: list[str]) -> list[int]:
+        resolved: list[int] = []
+        for phrase in phrases:
+            company_id = await self._search_company_id(phrase)
+            if company_id is not None:
+                resolved.append(company_id)
+        return resolved
+
     async def _language_table(self) -> dict[str, str]:
         """English language name -> ISO 639-1 code, fetched from TMDB's
         own language list and cached for this client's lifetime (T104,
@@ -340,6 +368,9 @@ class RealTmdbClient:
             excluded_keyword_ids = await self._resolve_keyword_ids(excluded_keywords)
             if excluded_keyword_ids:
                 params["without_keywords"] = "|".join(str(kid) for kid in excluded_keyword_ids)
+            excluded_company_ids = await self._resolve_company_ids(excluded_keywords)
+            if excluded_company_ids:
+                params["without_companies"] = "|".join(str(cid) for cid in excluded_company_ids)
         if year_min is not None:
             params[f"{date_field}.gte"] = f"{year_min}-01-01"
         if year_max is not None:

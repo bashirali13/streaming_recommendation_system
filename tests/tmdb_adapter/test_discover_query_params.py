@@ -387,6 +387,8 @@ async def test_discover_resolves_excluded_keywords_to_without_keywords():
     def handler(request: httpx.Request) -> httpx.Response:
         if "/search/keyword" in str(request.url):
             return _keyword_handler(request)
+        if "/search/company" in str(request.url):
+            return httpx.Response(200, json={"results": []})
         captured_params.update(dict(request.url.params))
         return _empty_discover_response(request)
 
@@ -412,6 +414,140 @@ async def test_discover_resolves_excluded_keywords_to_without_keywords():
     assert "with_keywords" not in captured_params
 
 
+_COMPANY_RESPONSES = {
+    "Marvel": {"results": [{"id": 420, "name": "Marvel Studios"}]},
+    "DC": {"results": [{"id": 429, "name": "DC"}]},
+    "Disney": {
+        "results": [
+            {"id": 99981, "name": "Disney Türkiye"},
+            {"id": 2, "name": "Walt Disney Pictures"},
+        ]
+    },
+}
+
+
+def _company_handler(request: httpx.Request) -> httpx.Response:
+    query = request.url.params.get("query", "")
+    return httpx.Response(200, json=_COMPANY_RESPONSES.get(query, {"results": []}))
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_resolves_excluded_keywords_to_without_companies_too():
+    """T106: without_companies is a discover-time layer on top of (not
+    instead of) without_keywords and the detail-call text-match check
+    (T095) -- it excludes a resolved company before a detail() call is
+    even spent on a doomed candidate.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _keyword_handler(request)
+        if "/search/company" in str(request.url):
+            return _company_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=["Marvel", "DC"],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    ids = set(captured_params["without_companies"].split("|"))
+    assert ids == {"420", "429"}
+    # without_keywords still applies too -- an additional layer, not a replacement.
+    assert "without_keywords" in captured_params
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_takes_the_first_company_search_result_even_when_imprecise():
+    """Mirrors `_resolve_keyword_ids`'s existing "trust TMDB's own top
+    result" approach rather than inventing a bespoke disambiguation
+    scheme. Confirmed live this is usually the expected entity, but not
+    always -- searching "Disney" ranks a regional office ("Disney
+    Turkiye") above the actual studio ("Walt Disney Pictures"). Accepted
+    as a known, bounded-risk limitation of this one optimization layer:
+    worst case, it excludes an irrelevant company that matches no real
+    candidate (a silent no-op, not a wrong exclusion of an unrelated
+    title), while `without_keywords` and the detail-call
+    `production_companies` text-match check (T095) still independently
+    and correctly enforce the exclusion regardless.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/company" in str(request.url):
+            return _company_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=["Disney"],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["without_companies"] == "99981"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_omits_without_companies_when_nothing_resolves():
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        if "/search/company" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=["Some Obscure Franchise Nobody Tagged"],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert "without_companies" not in captured_params
+
+
 @pytest.mark.tmdb_adapter
 @pytest.mark.asyncio
 async def test_discover_omits_without_keywords_when_nothing_resolves():
@@ -424,6 +560,8 @@ async def test_discover_omits_without_keywords_when_nothing_resolves():
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "/search/keyword" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        if "/search/company" in str(request.url):
             return httpx.Response(200, json={"results": []})
         captured_params.update(dict(request.url.params))
         return _empty_discover_response(request)
