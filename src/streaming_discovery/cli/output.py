@@ -16,7 +16,12 @@ import os
 from collections.abc import Callable
 
 from streaming_discovery.agents.discovery_agent import DiscoveryAgent
-from streaming_discovery.agents.orchestrator import Orchestrator, build_confirmation_summary
+from streaming_discovery.agents.orchestrator import (
+    ContractValidationError,
+    Orchestrator,
+    apply_correction,
+    build_confirmation_summary,
+)
 from streaming_discovery.agents.preference_agent import PreferenceAgent
 from streaming_discovery.agents.recommendation_agent import RecommendationAgent
 from streaming_discovery.config import Settings
@@ -60,6 +65,20 @@ def _parse_correction(raw: str) -> dict:
     return correction
 
 
+def _show_summary(
+    profile,
+    *,
+    print_func: PrintFunc,
+    render_summary: Callable[[object], None] | None,
+    header: str,
+) -> None:
+    if render_summary is not None:
+        render_summary(profile)  # the Rich table carries its own title/context
+    else:
+        print_func(header)
+        print_func(build_confirmation_summary(profile))
+
+
 async def default_confirm(
     profile,
     *,
@@ -74,19 +93,52 @@ async def default_confirm(
     real stdin/stdout. `render_summary`, if given, replaces the default
     plain-text summary print with a richer one (see cli/rich_ui.py) --
     the correction-reading logic below is unchanged either way.
+
+    A non-blank correction is never applied silently (T096): if it
+    doesn't match the `field=value` syntax at all, or if it parses but
+    produces an invalid profile (`apply_correction` raising
+    `ContractValidationError`), that's reported and the original
+    profile is kept, rather than either silently ignoring it (the
+    previous behavior -- no feedback either way) or letting the
+    exception crash the session. A correction that succeeds echoes the
+    updated profile back before returning, so the user can see it
+    actually took before discovery runs.
     """
-    if render_summary is not None:
-        render_summary(profile)
-    else:
-        print_func("\nHere's what I understood:")
-        print_func(build_confirmation_summary(profile))
+    _show_summary(
+        profile,
+        print_func=print_func,
+        render_summary=render_summary,
+        header="\nHere's what I understood:",
+    )
     answer = input_func(
         "\nPress Enter to continue, or type a correction "
         "(e.g. media_type=tv, providers=Netflix|Hulu): "
     ).strip()
     if not answer:
         return None
-    return _parse_correction(answer) or None
+    correction = _parse_correction(answer)
+    if not correction:
+        print_func(
+            "\nSorry, I didn't recognize that as a correction (expected "
+            "format: field=value, e.g. providers=Netflix|Hulu). "
+            "Continuing with your preferences unchanged."
+        )
+        return None
+    try:
+        updated_profile = apply_correction(profile, correction)
+    except ContractValidationError as exc:
+        print_func(
+            f"\nThat correction didn't produce a valid profile ({exc}). "
+            "Continuing with your preferences unchanged."
+        )
+        return None
+    _show_summary(
+        updated_profile,
+        print_func=print_func,
+        render_summary=render_summary,
+        header="\nHere's what I understood after your correction:",
+    )
+    return correction
 
 
 def render_package(package: RecommendationPackage) -> str:

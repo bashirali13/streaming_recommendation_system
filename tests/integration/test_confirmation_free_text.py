@@ -62,6 +62,70 @@ async def test_a_list_field_correction_uses_pipe_separated_values():
     assert correction == {"providers": ["Netflix", "Hulu"]}
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_valid_correction_echoes_the_updated_profile_before_returning():
+    """T096: after a non-blank, successfully-applied correction, the
+    updated preferences are shown back to the user -- not just silently
+    carried forward to discovery -- so they can see it actually took.
+    """
+    profile = _minimal_profile()
+    inputs = iter(["providers=Netflix|Hulu"])
+    printed: list[str] = []
+
+    correction = await default_confirm(
+        profile, input_func=lambda _prompt: next(inputs), print_func=printed.append
+    )
+
+    assert correction == {"providers": ["Netflix", "Hulu"]}
+    joined = "\n".join(printed)
+    assert "Netflix" in joined
+    assert "Hulu" in joined
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_unrecognized_correction_is_reported_not_silently_dropped():
+    """T096: typing something that doesn't match the field=value syntax
+    (e.g. forgetting the field name) used to silently do nothing, with
+    no feedback -- the user couldn't tell their correction was ignored.
+    """
+    profile = _minimal_profile()
+    inputs = iter(["Hulu"])  # missing "providers=" -- not valid syntax
+    printed: list[str] = []
+
+    correction = await default_confirm(
+        profile, input_func=lambda _prompt: next(inputs), print_func=printed.append
+    )
+
+    assert correction is None
+    joined = "\n".join(printed).lower()
+    assert "didn't recognize" in joined or "unrecognized" in joined
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_correction_producing_an_invalid_profile_is_reported_not_crashed():
+    """T096: a correction that parses syntactically but produces an
+    invalid profile (e.g. an inverted year range) used to raise
+    ContractValidationError uncaught here, crashing the whole session --
+    it must be a controlled, reported failure instead.
+    """
+    from streaming_discovery.contracts.preference_profile import PreferenceProfile
+
+    profile = PreferenceProfile(genres=["Comedy"], year_min=2000, year_max=2010)
+    inputs = iter(["year_min=2020"])  # now inverted: 2020 > 2010
+    printed: list[str] = []
+
+    correction = await default_confirm(
+        profile, input_func=lambda _prompt: next(inputs), print_func=printed.append
+    )
+
+    assert correction is None
+    joined = "\n".join(printed).lower()
+    assert "valid" in joined or "didn't" in joined or "couldn't" in joined
+
+
 def _minimal_profile():
     from streaming_discovery.contracts.preference_profile import PreferenceProfile
 

@@ -222,3 +222,5 @@ __marimo__/
 # to; not project content.
 session.md
 session.json
+session*.md
+session*.json
