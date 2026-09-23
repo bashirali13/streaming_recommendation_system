@@ -34,7 +34,14 @@ Rules:
   Action & Adventure, Adventure, Animation, Comedy, Crime, Documentary,
   Drama, Family, Fantasy, History, Horror, Kids, Music, Mystery, News,
   Reality, Romance, Sci-Fi & Fantasy, Science Fiction, Soap, Talk,
-  Thriller, TV Movie, War, War & Politics, Western.
+  Thriller, TV Movie, War, War & Politics, Western. "Only use one of
+  these exact names" means normalize a close synonym to the matching
+  official name, not skip genres entirely when the user's own wording
+  doesn't match verbatim -- e.g. "cartoon", "cartoon animation",
+  "animated", and "anime" all mean the genre "Animation" and MUST be
+  normalized to it; "rom-com" means "Romance" and "Comedy" (both);
+  "sci-fi" means "Science Fiction". Only drop a genre-sounding word
+  entirely if it truly has no reasonable official-list equivalent.
 - CRITICAL: whatever the user says the content should be ABOUT --
   subject matter, content category, or character type, not just mood --
   must end up SOMEWHERE, never silently dropped. If it exactly matches
