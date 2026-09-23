@@ -164,10 +164,21 @@ class TmdbClient(Protocol):
 
     async def details(self, *, media_type: MediaType, tmdb_id: int) -> dict:
         """Detail-level data not present in bulk results: runtime (movie)
-        or episode run time / season count (tv), watch/providers, and
-        keywords. Called only for finalist candidates, except for a TV
+        or episode run time / season count (tv), watch/providers,
+        keywords, and (T107) credits (cast/crew, for the person-exclusion
+        check). Called only for finalist candidates, except for a TV
         hard runtime/season-count constraint -- see the Discovery Agent
         contract's hard-filter exception.
+        """
+        ...
+
+    async def resolve_person_ids(self, names: list[str]) -> list[int]:
+        """Resolve free-text actor/director names to TMDB person ids
+        (T107), for the Discovery Agent to check a finalist candidate's
+        `credits` against. TMDB's `/discover` endpoints have no
+        `without_people` equivalent (confirmed live), so this can't be a
+        `discover()` query param -- it's a separate resolution step.
+        Soft: an unresolvable name is dropped, not failed closed.
         """
         ...
 
@@ -199,6 +210,7 @@ class RealTmdbClient:
         self._keyword_id_cache: dict[str, list[int]] = {}
         self._language_table_cache: dict[str, str] | None = None
         self._company_id_cache: dict[str, int | None] = {}
+        self._person_id_cache: dict[str, int | None] = {}
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -297,6 +309,35 @@ class RealTmdbClient:
             company_id = await self._search_company_id(phrase)
             if company_id is not None:
                 resolved.append(company_id)
+        return resolved
+
+    async def _search_person_id(self, text: str) -> int | None:
+        """TMDB person id matching a free-text name, cached per exact
+        query string for this client's lifetime (T107, mirroring
+        `_search_company_id`). Takes TMDB's own top-ranked result as-is.
+        """
+        if text not in self._person_id_cache:
+            payload = await self._get_json("/search/person", {"query": text})
+            results = payload.get("results", [])
+            self._person_id_cache[text] = results[0]["id"] if results else None
+        return self._person_id_cache[text]
+
+    async def resolve_person_ids(self, names: list[str]) -> list[int]:
+        """Resolve free-text actor/director names to TMDB person ids
+        (T107) -- used by the Discovery Agent to check a finalist
+        candidate's `credits` for an excluded person, since TMDB's
+        `/discover` endpoints have no `without_people` equivalent
+        (confirmed live), unlike genres/keywords/companies. Soft, like
+        the other `excluded_keywords` resolution layers: an unresolvable
+        name is dropped, not failed closed -- the Discovery Agent's own
+        text-match check is the layer of last resort for a hard
+        exclusion this can't resolve.
+        """
+        resolved: list[int] = []
+        for name in names:
+            person_id = await self._search_person_id(name)
+            if person_id is not None:
+                resolved.append(person_id)
         return resolved
 
     async def _language_table(self) -> dict[str, str]:
@@ -441,7 +482,7 @@ class RealTmdbClient:
         prefix = "movie" if media_type is MediaType.MOVIE else "tv"
         return await self._get_json(
             f"/{prefix}/{tmdb_id}",
-            {"append_to_response": "watch/providers,keywords"},
+            {"append_to_response": "watch/providers,keywords,credits"},
         )
 
     async def _paginate(

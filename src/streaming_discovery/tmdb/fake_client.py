@@ -43,6 +43,7 @@ class FakeTmdbClient:
         similar_results: dict[int, list[dict]] | None = None,
         detail_results: dict[int, dict] | None = None,
         title_ids: dict[str, int] | None = None,
+        person_ids: dict[str, int] | None = None,
         failure_mode: FailureMode | None = None,
     ) -> None:
         self._discover_results = discover_results or {}
@@ -57,6 +58,7 @@ class FakeTmdbClient:
         self._similar_results = similar_results or {}
         self._detail_results = detail_results or {}
         self._title_ids = title_ids or {}
+        self._person_ids = person_ids or {}
         self._failure_mode = failure_mode
         self.details_call_count = 0
         self.discover_calls: list[dict] = []
@@ -118,6 +120,10 @@ class FakeTmdbClient:
     async def search_title(self, *, media_type: MediaType, title: str) -> int | None:
         self._maybe_fail()
         return self._title_ids.get(title)
+
+    async def resolve_person_ids(self, names: list[str]) -> list[int]:
+        self._maybe_fail()
+        return [self._person_ids[name] for name in names if name in self._person_ids]
 
     async def similar(
         self, *, media_type: MediaType, tmdb_id: int, result_limit: int

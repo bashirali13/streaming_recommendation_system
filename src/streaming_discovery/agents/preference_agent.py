@@ -74,14 +74,18 @@ Rules:
   by the underlying database, even when they're exactly what the user
   wants).
 - If the user excludes something that is NOT one of those exact genre
-  names -- a franchise, cinematic universe, studio, character, or
-  similar -- put each excluded thing in excluded_keywords, one item per
-  thing excluded, never in excluded_genres and never only described in
-  additional_notes. Concrete example: "not Marvel or DC" ->
-  excluded_keywords: ["Marvel", "DC"] (two separate items, not one
-  combined string, and never left describing this only in
-  additional_notes). An explicit exclusion always belongs in a field a
-  downstream filter can actually enforce.
+  names -- a franchise, cinematic universe, studio, character, real
+  actor, director, or similar -- put each excluded thing in
+  excluded_keywords, one item per thing excluded, never in
+  excluded_genres and never only described in additional_notes.
+  Concrete example: "not Marvel or DC" -> excluded_keywords: ["Marvel",
+  "DC"] (two separate items, not one combined string, and never left
+  describing this only in additional_notes). A real person's name (an
+  actor or director the user wants avoided, e.g. "nothing with Jason
+  Statham") belongs here too, using their name exactly as given --
+  excluded_keywords: ["Jason Statham"], never additional_notes. An
+  explicit exclusion always belongs in a field a downstream filter can
+  actually enforce.
 - If the user specifies a language for the movie or show itself (e.g.
   "in Spanish", "a Korean drama", "French films", "something in its
   original Japanese"), put it in languages using the language's common

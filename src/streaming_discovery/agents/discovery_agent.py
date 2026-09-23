@@ -15,6 +15,23 @@ from streaming_discovery.tmdb.client import TmdbAdapterError, TmdbClient
 from streaming_discovery.tmdb.normalize import MOVIE_GENRES, TV_GENRES, normalize_candidate
 
 
+def _mentions_excluded_person(detail: dict, excluded_person_ids: list[int]) -> bool:
+    """T107: rejects a candidate whose cast OR crew includes an excluded
+    person (actor or director) -- TMDB's `/discover` endpoints have no
+    `without_people` equivalent (confirmed live), so this is the only
+    enforcement path for a person exclusion, the same shape as T095's
+    `_mentions_excluded_company` but against `credits` instead of
+    `production_companies`. `excluded_person_ids` is resolved once per
+    `run()` call via `resolve_person_ids`, not recomputed per candidate.
+    """
+    if not excluded_person_ids:
+        return False
+    credits_payload = detail.get("credits", {})
+    people = credits_payload.get("cast", []) + credits_payload.get("crew", [])
+    person_ids_in_credits = {person["id"] for person in people}
+    return bool(person_ids_in_credits & set(excluded_person_ids))
+
+
 def _mentions_excluded_company(detail: dict, query: DiscoveryQuery) -> bool:
     """Defensive re-check against TMDB's `production_companies` (T095),
     applied after the detail() call. Neither the title/overview text
@@ -99,6 +116,12 @@ class DiscoveryAgent:
 
         survivors = [item for item in raw_items if _survives_hard_filter(item, query)]
 
+        excluded_person_ids = (
+            await self._tmdb.resolve_person_ids(query.excluded_keywords)
+            if query.excluded_keywords
+            else []
+        )
+
         candidates: list[CandidateMedia] = []
         for item in survivors:
             try:
@@ -108,6 +131,8 @@ class DiscoveryAgent:
                     candidates=[], retry_number=query.retry_number, error=exc.error
                 )
             if _mentions_excluded_company(detail, query):
+                continue
+            if _mentions_excluded_person(detail, excluded_person_ids):
                 continue
             merged = {**item, **detail}
             candidate = normalize_candidate(
