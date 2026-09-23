@@ -223,6 +223,7 @@ class Orchestrator:
                 excluded_genres=profile.excluded_genres,
                 excluded_keywords=profile.excluded_keywords,
                 vibe_keywords=vibe_keywords,
+                languages=profile.languages,
                 year_min=year_min,
                 year_max=year_max,
                 runtime_max_minutes=runtime_max,

@@ -88,6 +88,7 @@ class DiscoveryAgent:
                     excluded_genres=query.excluded_genres,
                     excluded_keywords=query.excluded_keywords,
                     vibe_keywords=query.vibe_keywords,
+                    languages=query.languages,
                     year_min=query.year_min,
                     year_max=query.year_max,
                     runtime_max_minutes=query.runtime_max_minutes,

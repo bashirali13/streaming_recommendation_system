@@ -54,6 +54,7 @@ async def test_discover_sends_numeric_genre_ids_not_names():
         excluded_genres=["Horror"],
         excluded_keywords=[],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -85,6 +86,7 @@ async def test_discover_drops_an_unrecognized_genre_name_rather_than_sending_it(
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -115,6 +117,7 @@ async def test_discover_resolves_provider_names_to_ids_via_the_watch_providers_e
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -146,6 +149,7 @@ async def test_discover_apple_tv_resolves_via_substring_match():
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -181,6 +185,7 @@ async def test_discover_fails_closed_when_no_provider_name_resolves():
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -214,6 +219,7 @@ async def test_discover_caches_the_provider_list_across_calls():
             excluded_genres=[],
             excluded_keywords=[],
             vibe_keywords=[],
+            languages=[],
             year_min=None,
             year_max=None,
             runtime_max_minutes=None,
@@ -259,6 +265,7 @@ async def test_discover_resolves_vibe_keywords_via_the_keyword_search_endpoint()
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["fairy tale"],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -289,6 +296,7 @@ async def test_discover_falls_back_to_per_word_keyword_search_on_a_phrase_miss()
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["quirky humor"],  # the whole phrase has no match
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -324,6 +332,7 @@ async def test_discover_omits_with_keywords_when_nothing_resolves():
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["something nobody has ever tagged"],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -356,6 +365,7 @@ async def test_discover_caches_keyword_searches_across_calls():
             excluded_genres=[],
             excluded_keywords=[],
             vibe_keywords=["fairy tale"],
+            languages=[],
             year_min=None,
             year_max=None,
             runtime_max_minutes=None,
@@ -390,6 +400,7 @@ async def test_discover_resolves_excluded_keywords_to_without_keywords():
         excluded_genres=[],
         excluded_keywords=["Marvel", "DC"],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -427,6 +438,7 @@ async def test_discover_omits_without_keywords_when_nothing_resolves():
         excluded_genres=[],
         excluded_keywords=["Some Obscure Franchise Nobody Tagged"],
         vibe_keywords=[],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -472,6 +484,7 @@ async def test_discover_tries_and_semantics_first_for_multiple_keyword_ids():
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["road trip", "found family"],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -514,6 +527,7 @@ async def test_discover_falls_back_to_or_semantics_when_and_finds_nothing():
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["road trip", "found family"],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -547,6 +561,7 @@ async def test_discover_uses_a_single_keyword_id_directly_with_no_and_or_fallbac
         excluded_genres=[],
         excluded_keywords=[],
         vibe_keywords=["road trip"],
+        languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -555,3 +570,184 @@ async def test_discover_uses_a_single_keyword_id_directly_with_no_and_or_fallbac
 
     assert len(discover_calls) == 1
     assert discover_calls[0]["with_keywords"] == "500"
+
+
+_LANGUAGES_RESPONSE = [
+    {"iso_639_1": "en", "english_name": "English", "name": "English"},
+    {"iso_639_1": "ko", "english_name": "Korean", "name": "한국어/조선말"},
+    {"iso_639_1": "es", "english_name": "Spanish", "name": "Español"},
+    {"iso_639_1": "ja", "english_name": "Japanese", "name": "日本語"},
+]
+
+
+def _languages_handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json=_LANGUAGES_RESPONSE)
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_resolves_a_language_name_to_its_iso_code():
+    """T104: languages was previously a dead field -- captured by the
+    Preference Agent but never passed to discover() at all. Resolved via
+    TMDB's own language list, the same exact-then-substring approach
+    `_match_provider` uses for providers.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/configuration/languages" in str(request.url):
+            return _languages_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=["Korean"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["with_original_language"] == "ko"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_uses_only_the_first_resolvable_language():
+    """with_original_language accepts exactly one ISO code (confirmed
+    live -- unlike with_genres/with_keywords/with_companies, it does not
+    support comma/pipe multi-value syntax), so a second stated language
+    is never sent even though `languages` is a list.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/configuration/languages" in str(request.url):
+            return _languages_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=["Korean", "Japanese"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["with_original_language"] == "ko"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_skips_an_unresolvable_language_and_tries_the_next_one():
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/configuration/languages" in str(request.url):
+            return _languages_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=["Klingon", "Spanish"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["with_original_language"] == "es"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_omits_with_original_language_when_nothing_resolves():
+    """Unlike providers, an unresolvable language is soft-dropped
+    (data-model.md), not failed closed."""
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/configuration/languages" in str(request.url):
+            return _languages_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=["Klingon"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert "with_original_language" not in captured_params
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_caches_the_language_list_across_calls():
+    fetch_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal fetch_count
+        if "/configuration/languages" in str(request.url):
+            fetch_count += 1
+            return _languages_handler(request)
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    for _ in range(3):
+        await client.discover(
+            media_type=MediaType.MOVIE,
+            region="US",
+            provider_names=[],
+            included_genres=[],
+            excluded_genres=[],
+            excluded_keywords=[],
+            vibe_keywords=[],
+            languages=["Korean"],
+            year_min=None,
+            year_max=None,
+            runtime_max_minutes=None,
+            result_limit=20,
+        )
+
+    assert fetch_count == 1

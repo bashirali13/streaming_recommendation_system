@@ -82,10 +82,18 @@ Rules:
   combined string, and never left describing this only in
   additional_notes). An explicit exclusion always belongs in a field a
   downstream filter can actually enforce.
+- If the user specifies a language for the movie or show itself (e.g.
+  "in Spanish", "a Korean drama", "French films", "something in its
+  original Japanese"), put it in languages using the language's common
+  English name (e.g. "Spanish", "Korean", "French", "Japanese") -- never
+  in theme_descriptors, setting_descriptors, or additional_notes. Do NOT
+  populate languages from an incidental mention that isn't a request
+  about the content's own language (e.g. a setting like "set in Japan"
+  or a franchise mention does not imply a language preference).
 - additional_notes is for context that doesn't fit any other field
   (e.g. "watching with my kids," "on a rainy day") -- never use it as a
   place to describe an exclusion or the core subject of the request;
-  genres/theme_descriptors/excluded_genres/excluded_keywords/
+  genres/theme_descriptors/excluded_genres/excluded_keywords/languages/
   disliked_titles exist for that and are the only fields anything
   downstream actually reads to filter or rank candidates.
 - Do not call any tool, recommend a title, or resolve a conflicting

@@ -50,6 +50,30 @@ _VIBE_SEARCH_STOPWORDS = {"and", "the", "with", "that", "this", "from", "your"}
 and never usefully match a TMDB keyword."""
 
 
+def _match_language(name: str, table: dict[str, str]) -> str | None:
+    """Resolve one user/LLM-given language name against TMDB's own
+    language list (T104), the same exact-then-substring approach
+    `_match_provider` uses -- "Spanish" must exact-match "Spanish"
+    outright, while a looser phrase like "Mandarin Chinese" should still
+    resolve via substring against TMDB's "Chinese" entry. Among
+    substring matches, the shortest name is preferred as the more
+    likely canonical entry.
+    """
+    lowered = name.lower()
+    for language_name, code in table.items():
+        if language_name.lower() == lowered:
+            return code
+    candidates = [
+        (language_name, code)
+        for language_name, code in table.items()
+        if lowered in language_name.lower() or language_name.lower() in lowered
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: len(pair[0]))
+    return candidates[0][1]
+
+
 def _match_provider(name: str, table: dict[str, int]) -> int | None:
     """Resolve one user/LLM-given provider name against TMDB's live
     provider list (T086). Exact case-insensitive match first -- "Apple
@@ -105,6 +129,7 @@ class TmdbClient(Protocol):
         excluded_genres: list[str],
         excluded_keywords: list[str],
         vibe_keywords: list[str],
+        languages: list[str],
         year_min: int | None,
         year_max: int | None,
         runtime_max_minutes: int | None,
@@ -113,9 +138,15 @@ class TmdbClient(Protocol):
         """Bulk candidate search. Filters are expressed as TMDB query
         parameters wherever TMDB supports them server-side (FR-029) --
         genre, year range, provider/region, (for movies) runtime, (T087)
-        setting/theme descriptors resolved to TMDB keyword ids, and
-        (T091) excluded_keywords (franchise/studio/etc. exclusions)
-        resolved the same way but applied as an exclusion.
+        setting/theme descriptors resolved to TMDB keyword ids, (T091)
+        excluded_keywords (franchise/studio/etc. exclusions) resolved the
+        same way but applied as an exclusion, and (T104) `languages`
+        (original-language names, e.g. "Korean") resolved to a single
+        ISO 639-1 code via TMDB's own language list -- `with_original_
+        language` only accepts one value, unlike genre/keyword/company
+        params, so only the first name that resolves is used; this is a
+        soft signal like vibe_keywords, not a hard constraint, so an
+        unresolvable name is dropped rather than failing the query closed.
         """
         ...
 
@@ -166,6 +197,7 @@ class RealTmdbClient:
         self._http = http_client
         self._provider_table_cache: dict[tuple[MediaType, str], dict[str, int]] = {}
         self._keyword_id_cache: dict[str, list[int]] = {}
+        self._language_table_cache: dict[str, str] | None = None
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -239,6 +271,40 @@ class RealTmdbClient:
                 break
         return resolved
 
+    async def _language_table(self) -> dict[str, str]:
+        """English language name -> ISO 639-1 code, fetched from TMDB's
+        own language list and cached for this client's lifetime (T104,
+        mirroring `_provider_table`'s caching pattern) -- one extra call
+        per session at most. `/configuration/languages` returns a bare
+        JSON array rather than an object, so this goes through
+        `_get_json_list` rather than `_get_json`.
+        """
+        if self._language_table_cache is None:
+            payload = await self._get_json_list("/configuration/languages", {})
+            self._language_table_cache = {
+                entry["english_name"]: entry["iso_639_1"]
+                for entry in payload
+                if entry.get("english_name") and entry.get("iso_639_1")
+            }
+        return self._language_table_cache
+
+    async def _resolve_language_code(self, languages: list[str]) -> str | None:
+        """`with_original_language` only accepts a single ISO 639-1 code
+        (T104, confirmed live -- unlike with_genres/with_keywords/
+        with_companies, it does not support comma/pipe multi-value
+        syntax), so this returns at most one code: the first stated
+        language that resolves. `languages` is a soft signal like
+        vibe_keywords, not a hard constraint (data-model.md), so a name
+        TMDB's list doesn't recognize is simply skipped, not failed
+        closed.
+        """
+        table = await self._language_table()
+        for name in languages:
+            code = _match_language(name, table)
+            if code is not None:
+                return code
+        return None
+
     async def discover(
         self,
         *,
@@ -249,6 +315,7 @@ class RealTmdbClient:
         excluded_genres: list[str],
         excluded_keywords: list[str],
         vibe_keywords: list[str],
+        languages: list[str],
         year_min: int | None,
         year_max: int | None,
         runtime_max_minutes: int | None,
@@ -279,6 +346,10 @@ class RealTmdbClient:
             params[f"{date_field}.lte"] = f"{year_max}-12-31"
         if runtime_max_minutes is not None and media_type is MediaType.MOVIE:
             params["with_runtime.lte"] = str(runtime_max_minutes)
+        if languages:
+            language_code = await self._resolve_language_code(languages)
+            if language_code is not None:
+                params["with_original_language"] = language_code
 
         if vibe_keywords:
             keyword_ids = await self._resolve_keyword_ids(vibe_keywords)
@@ -356,11 +427,13 @@ class RealTmdbClient:
             page += 1
         return collected[:result_limit]
 
-    async def _get_json(self, endpoint: str, params: dict) -> dict:
+    async def _request(self, endpoint: str, params: dict) -> object:
         """A single request, with every failure mode translated into a
         `TmdbAdapterError` carrying a `TmdbErrorInfo` -- never a raw httpx
         exception or an unhandled parse error leaking past this adapter
-        (FR-027).
+        (FR-027). Returns the parsed JSON body, whatever its shape --
+        `_get_json`/`_get_json_list` narrow it to the shape a given
+        endpoint is expected to return.
         """
         try:
             response = await self._http.get(endpoint, params=params)
@@ -384,7 +457,7 @@ class RealTmdbClient:
             ) from exc
 
         try:
-            payload = response.json()
+            return response.json()
         except json.JSONDecodeError as exc:
             raise TmdbAdapterError(
                 TmdbErrorInfo(
@@ -393,11 +466,28 @@ class RealTmdbClient:
                 )
             ) from exc
 
+    async def _get_json(self, endpoint: str, params: dict) -> dict:
+        """Most TMDB endpoints (discover, details, search) return a JSON
+        object."""
+        payload = await self._request(endpoint, params)
         if not isinstance(payload, dict):
             raise TmdbAdapterError(
                 TmdbErrorInfo(
                     kind="malformed_response",
                     detail=f"Expected a JSON object from TMDB, got {type(payload).__name__}",
+                )
+            )
+        return payload
+
+    async def _get_json_list(self, endpoint: str, params: dict) -> list[dict]:
+        """A handful of TMDB endpoints (e.g. /configuration/languages,
+        T104) return a bare JSON array rather than an object."""
+        payload = await self._request(endpoint, params)
+        if not isinstance(payload, list):
+            raise TmdbAdapterError(
+                TmdbErrorInfo(
+                    kind="malformed_response",
+                    detail=f"Expected a JSON array from TMDB, got {type(payload).__name__}",
                 )
             )
         return payload
