@@ -12,6 +12,7 @@ here as the simpler, directly-testable content source of truth that
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 from streaming_discovery.agents.discovery_agent import DiscoveryAgent
@@ -170,6 +171,16 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
     )
 
 
+def _suppress_pydantic_ai_banner() -> None:
+    """pydantic-ai prints a startup banner (agent/model info, an
+    observability nudge) the first time an `Agent` is used, unless this
+    variable is set -- it was mistaken for an error in a real terminal
+    session (T083). `setdefault` so an explicit choice the user already
+    made (e.g. to see the banner deliberately) is never overridden.
+    """
+    os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
+
+
 class _RealModelProvider:
     """Production `ModelProvider`: one PydanticAI `Agent` per call,
     pointed at OpenRouter via its OpenAI-compatible API. Built here
@@ -183,6 +194,7 @@ class _RealModelProvider:
         self._api_key = api_key
 
     async def generate(self, *, system_prompt: str, user_prompt: str, output_type):
+        _suppress_pydantic_ai_banner()
         from pydantic_ai import Agent
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
