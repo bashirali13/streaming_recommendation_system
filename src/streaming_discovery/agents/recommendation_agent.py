@@ -147,29 +147,29 @@ def _meets_relevance_floor(profile: PreferenceProfile, candidate: CandidateMedia
     return any(d.lower() in haystack for d in profile.theme_descriptors)
 
 
-def _theme_completeness_bonus(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
-    """T102: a candidate satisfying EVERY stated theme_descriptor is
-    strongly preferred over one satisfying only some, even against a
-    realistic vote_average disadvantage. Before this, `_soft_score`'s
-    flat per-hit bonus (1.5 per matched descriptor) meant a fully
-    matching but less popular title could still lose to a more popular
-    title matching only one of several stated themes -- confirmed live
-    against a "road trip and found family" request, where T100 correctly
-    made a real, fully-matching TMDB title discoverable, but it never won
-    a final slot because its theme completeness wasn't worth enough
-    relative to popularity. Scoped to theme_descriptors only (not
-    tone/setting), matching T092's relevance-floor reasoning: theme is
-    the concrete, named-thing-the-user-wants signal, so completing it is
-    what should be rewarded outright; tone/setting stay purely additive
-    via the existing per-hit bonus so a candidate is never penalized for
-    missing a fuzzy mood word.
+def _has_full_theme_match(profile: PreferenceProfile, candidate: CandidateMedia) -> bool:
+    """Whether `candidate` reflects EVERY stated `theme_descriptors`
+    term, not just some -- scoped to theme only (not tone/setting),
+    matching T092's relevance-floor reasoning: theme is the concrete,
+    named-thing-the-user-wants signal. Returns False, not True, when no
+    theme was stated -- there is nothing to be "complete" about, so this
+    predicate should never promote an arbitrary candidate over another
+    in that case.
     """
     if not profile.theme_descriptors:
-        return 0.0
+        return False
     haystack = " ".join([candidate.overview, *candidate.thematic_keywords]).lower()
-    if all(d.lower() in haystack for d in profile.theme_descriptors):
-        return 4.0
-    return 0.0
+    return all(d.lower() in haystack for d in profile.theme_descriptors)
+
+
+def _theme_completeness_bonus(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
+    """T102: a small additive nudge for a full theme match, on top of
+    (not instead of) the tiering `_rank_candidates` (T103) does -- this
+    only matters for ordering among multiple full matches, since tiering
+    already guarantees any full match outranks any partial match
+    regardless of `vote_average`.
+    """
+    return 4.0 if _has_full_theme_match(profile, candidate) else 0.0
 
 
 def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
@@ -184,6 +184,29 @@ def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
         score -= 5.0  # exact match -- Discovery already hard-excludes this case; safety net
     score -= _disliked_similarity_penalty(profile, candidate)
     return score
+
+
+def _rank_candidates(
+    profile: PreferenceProfile, candidates: list[CandidateMedia]
+) -> list[CandidateMedia]:
+    """T103: sort by full theme completeness as a tier first,
+    `_soft_score` as the tiebreaker within a tier second. T102's flat
+    additive bonus alone wasn't robust: live-verifying against the real
+    "road trip and found family" request found a genuinely full-matching
+    but obscure candidate (TMDB `vote_average` 0.0) still losing to
+    popular partial matches (`vote_average` ~8.5-8.7) -- a gap far
+    larger than any fixed bonus can be safely tuned to always beat
+    without eventually overcorrecting the opposite way for a smaller,
+    more ordinary gap. Tiering guarantees a full match is never beaten
+    by popularity alone, which is what actually delivers "the whole
+    catalog is a candidate, not just what's already popular" rather than
+    just narrowing the odds of it.
+    """
+    return sorted(
+        candidates,
+        key=lambda c: (_has_full_theme_match(profile, c), _soft_score(profile, c)),
+        reverse=True,
+    )
 
 
 def _descriptors(profile: PreferenceProfile) -> list[str]:
@@ -251,7 +274,7 @@ class RecommendationAgent:
     async def run(self, profile: PreferenceProfile, pool: CandidatePool) -> RecommendationPackage:
         qualifying = _hard_filter(profile, pool.candidates)
         qualifying = [c for c in qualifying if _meets_relevance_floor(profile, c)]
-        ranked = sorted(qualifying, key=lambda c: _soft_score(profile, c), reverse=True)
+        ranked = _rank_candidates(profile, qualifying)
         selected = _deduplicate(ranked)[:3]
 
         if not selected:

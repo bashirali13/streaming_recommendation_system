@@ -9,6 +9,7 @@ from streaming_discovery.agents.recommendation_agent import (
     _deduplicate,
     _hard_filter,
     _has_weak_tone_evidence,
+    _rank_candidates,
     _soft_score,
 )
 from streaming_discovery.contracts.candidate_media import CandidateMedia
@@ -120,6 +121,49 @@ class TestSoftScore:
         unrelated = _candidate(tmdb_id=2, title="Other Title", overview="Nothing related.")
 
         assert _soft_score(profile, similar_to_disliked) < _soft_score(profile, unrelated)
+
+
+class TestRankCandidates:
+    def test_full_theme_match_always_outranks_a_more_popular_partial_match(self):
+        """T103: T102's flat +4.0 `_soft_score` bonus for full theme
+        completeness assumed realistic vote_average gaps (~2 points).
+        Live-verifying against the real "road trip and found family"
+        request found a far larger gap: a genuinely full-matching but
+        obscure candidate with vote_average 0.0 (TMDB's real value for
+        "Starguy") lost every time to popular partial matches around
+        8.5-8.7 (TMDB's real values, e.g. "LEGO Monkie Kid") -- a gap no
+        fixed additive bonus can be safely tuned to always beat without
+        eventually overcorrecting the opposite way. Fix: rank by full
+        theme completeness as a tier first, `_soft_score` only as the
+        tiebreaker within a tier -- this is what actually delivers "the
+        whole catalog is a candidate, not just what's already popular."
+        """
+        profile = PreferenceProfile(theme_descriptors=["road trip", "found family"])
+        obscure_full_match = _candidate(
+            tmdb_id=1,
+            title="Starguy",
+            overview="A road trip that turns into found family.",
+            vote_average=0.0,
+        )
+        popular_partial_match = _candidate(
+            tmdb_id=2,
+            title="LEGO Monkie Kid",
+            overview="Found family and adventure in modern-day China.",
+            vote_average=8.662,
+        )
+
+        ranked = _rank_candidates(profile, [popular_partial_match, obscure_full_match])
+
+        assert ranked[0].title == "Starguy"
+
+    def test_within_a_tier_soft_score_still_breaks_the_tie(self):
+        profile = PreferenceProfile(genres=["Drama"])
+        higher = _candidate(tmdb_id=1, title="Higher", genres=["Drama"], vote_average=7.0)
+        lower = _candidate(tmdb_id=2, title="Lower", genres=[], vote_average=7.0)
+
+        ranked = _rank_candidates(profile, [lower, higher])
+
+        assert ranked[0].title == "Higher"
 
 
 class TestWeakToneEvidence:
