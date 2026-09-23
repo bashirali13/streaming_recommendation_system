@@ -154,6 +154,72 @@ async def test_guided_cli_status_spinner_is_ascii_safe():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_guided_cli_pauses_the_spinner_during_the_confirmation_prompt(monkeypatch):
+    """T088: the confirmation-correction prompt reads real terminal
+    input while the status spinner's Live background thread is still
+    actively repainting that same line, garbling/hiding what the user
+    types. The spinner must be paused immediately before that read and
+    resumed immediately after.
+    """
+    prompt = build_preference_prompt(None, _INTAKE_ANSWERS)
+    preference_provider = FakeModelProvider(responses={prompt: _PROFILE})
+    recommendation_provider = FakeModelProvider()
+    rationale_prompt = build_rationale_prompt(
+        _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
+    )
+    recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
+        text="Bright Days is an uplifting pick."
+    )
+
+    orchestrator = Orchestrator(
+        preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),
+        discovery_agent=DiscoveryAgent(
+            tmdb_client=FakeTmdbClient(
+                discover_results={"movie": [_RAW_MOVIE]}, detail_results=_DETAILS
+            )
+        ),
+        recommendation_agent=RecommendationAgent(
+            provider=recommendation_provider, max_additional_attempts=2
+        ),
+        region="US",
+        result_limit=20,
+    )
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=False, width=100)
+    events: list[str] = []
+    original_stop = Status.stop
+    original_start = Status.start
+
+    def spy_stop(self) -> None:
+        events.append("stop")
+        return original_stop(self)
+
+    def spy_start(self) -> None:
+        events.append("start")
+        return original_start(self)
+
+    monkeypatch.setattr(Status, "stop", spy_stop)
+    monkeypatch.setattr(Status, "start", spy_start)
+
+    remaining = iter(["", "movie", "", "something uplifting", "", "", ""])
+
+    def input_func(prompt_text: str = "") -> str:
+        if prompt_text.startswith("\nPress Enter to continue"):
+            events.append("confirm_input")
+        return next(remaining, "")
+
+    await run_guided_cli(
+        orchestrator, input_func=input_func, print_func=lambda _line: None, console=console
+    )
+
+    confirm_index = events.index("confirm_input")
+    assert events[confirm_index - 1] == "stop"
+    assert events[confirm_index + 1] == "start"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_guided_cli_status_text_updates_per_pipeline_phase(monkeypatch):
     """T084: the status indicator shows which phase is currently
     running (interpreting, searching TMDB, curating) instead of one

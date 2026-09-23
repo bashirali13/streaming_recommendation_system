@@ -205,18 +205,34 @@ async def run_guided_cli(
     if conflict:
         print_func(f"\nHeads up: {conflict}. Please resolve this at the confirmation step below.")
 
+    # T088: while a status spinner is active (set below, once the `with`
+    # block is entered), its Live background thread keeps repainting the
+    # terminal line -- confirm() pauses it before reading real terminal
+    # input, so what the user types isn't garbled/hidden underneath it.
+    _active_status: object | None = None
+
     async def confirm(profile) -> dict | None:
         render_summary = (
             (lambda p: print_confirmation_summary(console, p)) if console is not None else None
         )
-        return await default_confirm(
-            profile, input_func=input_func, print_func=print_func, render_summary=render_summary
-        )
+        if _active_status is not None:
+            _active_status.stop()
+        try:
+            return await default_confirm(
+                profile,
+                input_func=input_func,
+                print_func=print_func,
+                render_summary=render_summary,
+            )
+        finally:
+            if _active_status is not None:
+                _active_status.start()
 
     try:
         if console is not None:
             initial_status = f"[bold blue]{STEP_INTERPRETING}...[/bold blue]"
             with console.status(initial_status, spinner="line") as status:
+                _active_status = status
 
                 def on_step(step: str, _status=status) -> None:
                     _status.update(f"[bold blue]{step}...[/bold blue]")
