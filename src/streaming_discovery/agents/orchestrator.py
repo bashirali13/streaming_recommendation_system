@@ -174,11 +174,17 @@ class Orchestrator:
         field (tone/setting/theme) -- those never cross into a
         TMDB-shaped query (contracts/discovery-agent.md).
 
-        `vibe_keywords` (T087) carries `tone_descriptors`,
-        `setting_descriptors`, and `theme_descriptors` through as literal
+        `vibe_keywords` (T087, narrowed by T089) carries
+        `setting_descriptors` and `theme_descriptors` through as literal
         TMDB keyword-search terms -- not interpretation, just another
         deterministic TMDB-server-side filter (FR-029), resolved to real
-        keyword ids inside `RealTmdbClient.discover()`.
+        keyword ids inside `RealTmdbClient.discover()`. `tone_descriptors`
+        stay excluded: tone is a fuzzy/subjective mood signal, not the
+        concrete subject matter TMDB's keyword catalog is built around,
+        and OR-ing a noisy tone-keyword match in let an otherwise
+        irrelevant candidate satisfy discovery on tone alone. Tone stays
+        fully in play for the Recommendation Agent's soft scoring and
+        rationale, unchanged.
 
         Relaxing `RelaxableConstraint.TONE` drops both `vibe_keywords`
         and `included_genres` entirely for this attempt -- without this,
@@ -190,11 +196,7 @@ class Orchestrator:
         year_min, year_max = profile.year_min, profile.year_max
         runtime_max = profile.runtime_max_minutes
         included_genres = profile.genres
-        vibe_keywords = [
-            *profile.tone_descriptors,
-            *profile.setting_descriptors,
-            *profile.theme_descriptors,
-        ]
+        vibe_keywords = [*profile.setting_descriptors, *profile.theme_descriptors]
         if relaxed_constraint is RelaxableConstraint.YEAR_RANGE:
             year_min = year_max = None
         if relaxed_constraint is RelaxableConstraint.RUNTIME:
