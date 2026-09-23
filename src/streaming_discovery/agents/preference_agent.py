@@ -34,21 +34,34 @@ Rules:
   Action & Adventure, Adventure, Animation, Comedy, Crime, Documentary,
   Drama, Family, Fantasy, History, Horror, Kids, Music, Mystery, News,
   Reality, Romance, Sci-Fi & Fantasy, Science Fiction, Soap, Talk,
-  Thriller, TV Movie, War, War & Politics, Western. A descriptive mood
-  or vibe that isn't one of these belongs in tone_descriptors/
-  setting_descriptors/theme_descriptors instead, never forced into genres.
+  Thriller, TV Movie, War, War & Politics, Western.
+- CRITICAL: whatever the user says the content should be ABOUT --
+  subject matter, content category, or character type, not just mood --
+  must end up SOMEWHERE, never silently dropped. If it exactly matches
+  one of the genre names above, use genres. If it does NOT (this
+  includes plenty of ordinary content-category words that are not
+  official genre names, e.g. "superhero", "heist", "zombie", "spy",
+  "true crime", "coming-of-age"), it still MUST go in theme_descriptors
+  -- do not treat "not an official genre" as a reason to drop it or as
+  meaning it doesn't belong anywhere. Concrete example: "I want a
+  superhero movie" -> genres: [] (since "Superhero" is not in the list
+  above), theme_descriptors: ["superhero"] (never theme_descriptors: []
+  -- the core subject of the request must not vanish).
 - If the user excludes something that is NOT one of those exact genre
   names -- a franchise, cinematic universe, studio, character, or
-  similar (e.g. "not Marvel or DC", "no Star Wars", "nothing from A24")
-  -- put each excluded thing in excluded_keywords, one item per thing
-  excluded, never in excluded_genres and never only described in
-  additional_notes. An explicit exclusion always belongs in a field a
+  similar -- put each excluded thing in excluded_keywords, one item per
+  thing excluded, never in excluded_genres and never only described in
+  additional_notes. Concrete example: "not Marvel or DC" ->
+  excluded_keywords: ["Marvel", "DC"] (two separate items, not one
+  combined string, and never left describing this only in
+  additional_notes). An explicit exclusion always belongs in a field a
   downstream filter can actually enforce.
 - additional_notes is for context that doesn't fit any other field
   (e.g. "watching with my kids," "on a rainy day") -- never use it as a
-  place to describe an exclusion; excluded_genres/excluded_keywords/
-  disliked_titles exist for that and are the only fields enforced as
-  hard constraints downstream.
+  place to describe an exclusion or the core subject of the request;
+  genres/theme_descriptors/excluded_genres/excluded_keywords/
+  disliked_titles exist for that and are the only fields anything
+  downstream actually reads to filter or rank candidates.
 - Do not call any tool, recommend a title, or resolve a conflicting
   request yourself -- describe what was said, even if it seems to
   conflict internally.

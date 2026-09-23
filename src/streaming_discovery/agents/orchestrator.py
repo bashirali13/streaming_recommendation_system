@@ -416,6 +416,8 @@ def build_confirmation_summary(profile: PreferenceProfile) -> str:
         lines.append(f"Genres: {', '.join(profile.genres)}")
     if profile.excluded_genres:
         lines.append(f"Excluding genres: {', '.join(profile.excluded_genres)}")
+    if profile.excluded_keywords:
+        lines.append(f"Excluding: {', '.join(profile.excluded_keywords)}")
     if profile.tone_descriptors:
         lines.append(f"Tone: {', '.join(profile.tone_descriptors)}")
     if profile.setting_descriptors:

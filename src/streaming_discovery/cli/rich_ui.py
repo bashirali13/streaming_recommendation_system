@@ -31,6 +31,7 @@ _SUMMARY_FIELDS: list[tuple[str, str, bool]] = [
     ("Providers", "providers", True),
     ("Genres", "genres", True),
     ("Excluding genres", "excluded_genres", True),
+    ("Excluding", "excluded_keywords", True),
     ("Tone", "tone_descriptors", True),
     ("Setting", "setting_descriptors", True),
     ("Themes", "theme_descriptors", True),

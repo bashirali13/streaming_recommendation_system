@@ -54,6 +54,21 @@ class TestPrintConfirmationSummary:
         assert "Drama" in output
         assert "Providers" not in output
 
+    def test_excluded_keywords_are_shown_when_set(self):
+        """T093: same gap as the plain-text summary -- excluded_keywords
+        (T091) was never wired into the Rich table either.
+        """
+        console, buffer = _capturing_console()
+        profile = PreferenceProfile(
+            theme_descriptors=["superhero"], excluded_keywords=["Marvel", "DC"]
+        )
+
+        print_confirmation_summary(console, profile)
+
+        output = buffer.getvalue()
+        assert "Marvel" in output
+        assert "DC" in output
+
 
 class TestPrintRecommendationPackage:
     def test_filled_roles_are_rendered(self):

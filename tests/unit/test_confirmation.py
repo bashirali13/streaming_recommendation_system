@@ -34,6 +34,21 @@ class TestBuildConfirmationSummary:
 
         assert "movie" in summary.lower()
 
+    def test_excluded_keywords_are_shown_when_set(self):
+        """T093: excluded_keywords (T091) was never wired into the
+        confirmation summary, so a captured franchise/studio exclusion
+        was invisible to the user before the search ran -- no way to
+        confirm it worked or correct it if it didn't.
+        """
+        profile = PreferenceProfile(
+            theme_descriptors=["superhero"], excluded_keywords=["Marvel", "DC"]
+        )
+
+        summary = build_confirmation_summary(profile)
+
+        assert "Marvel" in summary
+        assert "DC" in summary
+
 
 @pytest.mark.unit
 class TestApplyCorrection:
