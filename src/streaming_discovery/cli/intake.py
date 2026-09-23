@@ -29,6 +29,7 @@ from streaming_discovery.cli.rich_ui import (
     print_welcome_banner,
 )
 from streaming_discovery.config import Settings
+from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.llm.provider import ModelCallError
 from streaming_discovery.tmdb.client import TmdbAdapterError
 
@@ -45,15 +46,82 @@ _INTAKE_PROMPTS: dict[str, str] = {
 }
 
 
+def _already_answered(key: str, profile: PreferenceProfile) -> bool:
+    """Whether a partial `PreferenceProfile` already interpreted from
+    free text alone fully covers this guided question (T085; spec.md
+    line 308). Only the three questions that map 1:1 to a single
+    profile field can ever be reported as fully answered -- the two
+    compound questions (mood_and_interests, optional_constraints) each
+    cover several fields at once, so a binary skip could silently drop
+    whichever of those free text didn't cover; they are previewed via
+    `_already_noted_note` instead of skipped.
+    """
+    if key == "format":
+        return profile.media_type is not None
+    if key == "services":
+        return bool(profile.providers)
+    if key == "exclusions":
+        return bool(profile.excluded_genres)
+    return False
+
+
+def _already_noted_note(key: str, profile: PreferenceProfile) -> str | None:
+    """A short preview of what free text already captured for a
+    compound guided question, to append to its prompt so answering
+    feels additive rather than a blind re-ask. `None` when there is
+    nothing to show, or for a single-field question (those are skipped
+    outright by `_already_answered` instead of previewed).
+    """
+    if key == "mood_and_interests":
+        parts = [
+            *profile.genres,
+            *profile.tone_descriptors,
+            *profile.setting_descriptors,
+            *profile.theme_descriptors,
+        ]
+    elif key == "optional_constraints":
+        parts = []
+        if profile.year_min is not None or profile.year_max is not None:
+            parts.append(f"{profile.year_min or 'any'}-{profile.year_max or 'any'}")
+        if profile.runtime_max_minutes is not None:
+            parts.append(f"under {profile.runtime_max_minutes} min")
+        if profile.season_count_max is not None:
+            parts.append(f"at most {profile.season_count_max} seasons")
+        parts.extend(profile.languages)
+        parts.extend(profile.liked_titles)
+        parts.extend(profile.disliked_titles)
+        if profile.additional_notes:
+            parts.append(profile.additional_notes)
+    else:
+        parts = []
+    return f"(already noted: {', '.join(parts)}) " if parts else None
+
+
 async def run_guided_intake(
-    *, input_func: InputFunc = input, print_func: PrintFunc = print
+    *,
+    input_func: InputFunc = input,
+    print_func: PrintFunc = print,
+    partial_profile: PreferenceProfile | None = None,
 ) -> dict[str, str | None]:
     """Ask the five optional intake prompts in the fixed sequence; a
     blank answer stays unspecified (FR-002, FR-003), never defaulted.
+
+    `partial_profile`, if given, is what free text alone already
+    interpreted into a `PreferenceProfile` (T085): a question already
+    fully answered by it is skipped outright rather than re-asked, and
+    a compound question that's partially covered gets an "already
+    noted" preview appended to its prompt instead.
     """
     print_func("A few optional questions -- press Enter to skip any of them.")
     answers: dict[str, str | None] = {}
     for key, prompt in _INTAKE_PROMPTS.items():
+        if partial_profile is not None:
+            if _already_answered(key, partial_profile):
+                answers[key] = None
+                continue
+            note = _already_noted_note(key, partial_profile)
+            if note:
+                prompt = f"{prompt}{note}"
         answer = input_func(prompt).strip()
         answers[key] = answer if answer else None
     return answers
@@ -112,7 +180,26 @@ async def run_guided_cli(
     )
     raw_user_input = input_func("> ").strip() or None
 
-    intake_answers = await run_guided_intake(input_func=input_func, print_func=print_func)
+    # T085: when free text was given, interpret it alone first so the
+    # guided questions it already answers can be skipped (or, for a
+    # compound question, previewed) instead of re-asked. A bounded,
+    # separate LLM call from the one that produces the final profile --
+    # if it fails outright, fall back to asking every question as
+    # before, rather than letting a purely-optimistic pre-check take
+    # down the whole session (the final interpret call inside
+    # run_single_attempt still reports a real failure normally).
+    partial_profile: PreferenceProfile | None = None
+    if raw_user_input:
+        try:
+            partial_profile = await orchestrator.interpret_preferences(
+                raw_user_input=raw_user_input, intake_answers=None
+            )
+        except ModelCallError:
+            partial_profile = None
+
+    intake_answers = await run_guided_intake(
+        input_func=input_func, print_func=print_func, partial_profile=partial_profile
+    )
 
     conflict = _detect_format_conflict(raw_user_input, intake_answers)
     if conflict:
