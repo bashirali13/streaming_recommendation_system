@@ -58,3 +58,54 @@ async def test_excluded_keyword_mentioned_in_title_or_overview_is_rejected_befor
     assert "Spider-Man: Into the Spider-Verse" not in titles
     assert "My Hero Academia: Heroes Rising" in titles
     assert tmdb.details_call_count == 1  # only the surviving candidate got a detail() call
+
+
+# A real TMDB overview almost never names the parent studio/publisher, and
+# TMDB's own keyword tagging for a franchise like "Marvel" is inconsistent
+# (empirically confirmed: Spider-Man: Into the Spider-Verse's real TMDB
+# keywords are ["superhero", "based on comic", "aftercreditsstinger",
+# "alternate universe"] -- no "marvel" at all -- while its real
+# production_companies includes "Marvel Entertainment"). This fixture
+# matches that real shape: neither title nor overview nor keywords mention
+# "Marvel", so only a production_companies check can catch it.
+_REALISTIC_MARVEL_MOVIE = {
+    "id": 3,
+    "title": "Into the Spider-Verse",
+    "overview": "A teenager gains extraordinary powers and teams up with heroes from other worlds.",
+    "genre_ids": [16],
+    "release_date": "2018-12-14",
+    "vote_average": 8.4,
+}
+_REALISTIC_DETAILS = {
+    3: {
+        **_REALISTIC_MARVEL_MOVIE,
+        "genres": [{"id": 16, "name": "Animation"}],
+        "runtime": 117,
+        "watch/providers": {"results": {}},
+        "keywords": {"keywords": [{"id": 1, "name": "superhero"}, {"id": 2, "name": "multiverse"}]},
+        "production_companies": [
+            {"id": 5, "name": "Sony Pictures Animation"},
+            {"id": 6, "name": "Marvel Entertainment"},
+        ],
+    }
+}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_excluded_keyword_matching_only_a_production_company_name_is_still_rejected():
+    """T095: neither the primary text-match check (title/overview) nor
+    TMDB's own keyword tagging can be relied on to name the excluded
+    franchise -- production_companies is the reliable signal.
+    """
+    tmdb = FakeTmdbClient(
+        discover_results={"movie": [_REALISTIC_MARVEL_MOVIE]}, detail_results=_REALISTIC_DETAILS
+    )
+    agent = DiscoveryAgent(tmdb_client=tmdb)
+    query = DiscoveryQuery(
+        media_type=MediaType.MOVIE, region="US", retry_number=0, excluded_keywords=["Marvel"]
+    )
+
+    pool = await agent.run(query)
+
+    assert pool.candidates == []

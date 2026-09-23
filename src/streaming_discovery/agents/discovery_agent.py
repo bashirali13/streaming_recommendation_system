@@ -15,6 +15,27 @@ from streaming_discovery.tmdb.client import TmdbAdapterError, TmdbClient
 from streaming_discovery.tmdb.normalize import MOVIE_GENRES, TV_GENRES, normalize_candidate
 
 
+def _mentions_excluded_company(detail: dict, query: DiscoveryQuery) -> bool:
+    """Defensive re-check against TMDB's `production_companies` (T095),
+    applied after the detail() call. Neither the title/overview text
+    match nor TMDB's own `without_keywords` filter can be relied on for
+    a franchise/studio exclusion: a real TMDB overview almost never
+    names the parent studio/publisher, and TMDB's own keyword tagging
+    for something like "Marvel" is inconsistent -- confirmed
+    empirically, "Spider-Man: Into the Spider-Verse"'s real TMDB
+    keywords are ["superhero", "based on comic", "aftercreditsstinger",
+    "alternate universe"], no "marvel" at all, while its real
+    `production_companies` includes "Marvel Entertainment".
+    `production_companies` is the reliably-populated signal for this.
+    """
+    if not query.excluded_keywords:
+        return False
+    company_names = " ".join(
+        company.get("name", "") for company in detail.get("production_companies", [])
+    ).lower()
+    return any(term.lower() in company_names for term in query.excluded_keywords)
+
+
 def _survives_hard_filter(raw_item: dict, query: DiscoveryQuery) -> bool:
     """Client-side hard filtering, applied to the bulk (un-enriched) item
     *before* spending a detail-level call on it -- exact-match
@@ -85,6 +106,8 @@ class DiscoveryAgent:
                 return CandidatePool(
                     candidates=[], retry_number=query.retry_number, error=exc.error
                 )
+            if _mentions_excluded_company(detail, query):
+                continue
             merged = {**item, **detail}
             candidate = normalize_candidate(
                 merged, media_type=query.media_type, region=query.region, include_enrichment=True
