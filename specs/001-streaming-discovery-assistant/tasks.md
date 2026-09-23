@@ -248,6 +248,17 @@ Single project, per plan.md's Structure Decision: `src/streaming_discovery/`, `t
 
 ---
 
+## Phase 10: Post-Launch Refinements (from the first real live run)
+
+**Purpose**: fixes and UX refinements raised after Polish, during the user's first live (non-demo-mode) run against real TMDB/OpenRouter credentials.
+
+- [x] T082 Fix `MODEL_NAME` in the user's local `.env`: `deepseek/deepseek-chat-v4-0731` is not a valid OpenRouter model ID (the live run failed with a 400 from OpenRouter). The correct slug, confirmed against OpenRouter's own model page plus three independent listings, is `deepseek/deepseek-v4-flash-0731`. Config-only fix, no code/test change — `Settings`/`.env.example` already treat `MODEL_NAME` as a free-form required string per T020/T021.
+- [ ] T083 Suppress `pydantic-ai`'s startup banner in real (non-demo) runs by setting `PYDANTIC_AI_NO_BANNER=1` before constructing an `Agent` in `_RealModelProvider.generate` (`cli/output.py`) — the banner itself names this variable as the fix; it was cluttering terminal output and had been mistaken for an error.
+- [ ] T084 Terminal observability: make the CLI's mid-pipeline status indicator (`cli/intake.run_guided_cli`'s `console.status(...)`) show which phase is currently running (interpreting the request, searching TMDB, curating picks) instead of one static message for the whole pipeline — requested as a stretch goal, and to make the multi-agent routing visible rather than a silent pause.
+- [ ] T085 Guided intake skips a question already answered by free text, per spec.md line 308 ("the system may skip asking about a field it can already infer as unnecessary"), raised after a live run where a fully-descriptive free-text request was still followed by all five guided questions repeating the same ground. Design (chosen after weighing the cost/precision tradeoff with the user): `run_guided_cli` first interprets free text alone (one extra, bounded LLM call, only when free text was given; falls back to asking every question if that call fails) to get a partial `PreferenceProfile`. The three guided questions that map 1:1 to a single field (`format`->`media_type`, `services`->`providers`, `exclusions`->`excluded_genres`) are skipped outright when already populated. The two compound questions (`mood_and_interests` covers genres/tone/setting/theme; `optional_constraints` covers year range/runtime/season cap/language/liked/disliked titles/notes) are never skipped, since a binary skip would silently drop whichever of their several fields free text didn't cover — instead their prompt shows an "already noted: ..." preview of what free text already captured, so answering feels additive rather than a blind re-ask.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
