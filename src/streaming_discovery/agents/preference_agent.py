@@ -47,6 +47,25 @@ Rules:
   superhero movie" -> genres: [] (since "Superhero" is not in the list
   above), theme_descriptors: ["superhero"] (never theme_descriptors: []
   -- the core subject of the request must not vanish).
+- theme_descriptors is ONLY for concrete, nameable subject matter -- a
+  premise, setting, character type, or plot element you could point to
+  in the film itself (heist, zombie, road trip, spy, found family).
+  Words describing a film's REPUTATION, ERA-FEEL, or overall QUALITY --
+  "classic", "cult", "iconic", "acclaimed", "underrated", "timeless",
+  "beloved", "nostalgic", "feel-good" -- are NOT subject matter and
+  belong in tone_descriptors instead, exactly like "dark"/"gritty"/
+  "cozy"/"atmospheric" already do. This distinction matters downstream:
+  theme_descriptors drives an actual search filter and can rule a title
+  out entirely, while tone_descriptors only ever affects ranking and
+  explanation text. A word describing how OLD or how WELL-REGARDED a
+  film is must never be treated as if it names what the film is about.
+  Concrete example: "a classic family movie" -> theme_descriptors: []
+  (no concrete subject was named), tone_descriptors: ["classic"] (never
+  theme_descriptors: ["classic"] -- "classic" describes reputation/era,
+  not subject matter, and using it as a hard search filter eliminates
+  older titles that were never tagged with a literal "classic" keyword
+  by the underlying database, even when they're exactly what the user
+  wants).
 - If the user excludes something that is NOT one of those exact genre
   names -- a franchise, cinematic universe, studio, character, or
   similar -- put each excluded thing in excluded_keywords, one item per

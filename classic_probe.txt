@@ -1,0 +1,3 @@
+[(324700, 'classic'), (354728, 'clássico'), (287939, 'eastern classic'), (345881, 'porn classic'), (298574, 'classic western')]
+overview: Follow the adventures of Belle, a bright young woman who finds herself in the castle of a prince who's been turned into a mysterious beast. With the help of the castle's enchanted staff, Belle soon learns the most important lesson of all -- that true beauty comes from within.
+keywords: ['princess', 'france', 'prince', 'castle', 'villain', 'rose', 'musical', 'insane asylum', 'beast', 'based on fairy tale', 'eccentric man', 'wonder', 'dedication', 'romantic', 'earnest', 'enchant', 'hopeful', 'sincere']
