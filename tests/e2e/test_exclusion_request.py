@@ -89,7 +89,7 @@ async def test_exclusion_and_season_cap_hold_across_the_retry():
         _PROFILE, title="Deep Waters", overview=_DETAILS[1]["overview"], weak_evidence=False
     )
     recommendation_provider._responses[prompt] = _RationaleOutput(
-        text="Deep Waters is a mystery series that fits your request."
+        for_title="Deep Waters", text="Deep Waters is a mystery series that fits your request."
     )
 
     fake_client = FakeTmdbClient(

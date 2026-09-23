@@ -99,7 +99,7 @@ def _orchestrator(preference_provider: FakeModelProvider) -> Orchestrator:
         _FINAL_PROFILE, title="Cold Case", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Cold Case matches your dark, gritty, cold request."
+        for_title="Cold Case", text="Cold Case matches your dark, gritty, cold request."
     )
     return Orchestrator(
         preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),

@@ -68,7 +68,7 @@ async def test_guided_cli_uses_rich_rendering_when_a_console_is_given():
         _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Bright Days is an uplifting pick."
+        for_title="Bright Days", text="Bright Days is an uplifting pick."
     )
 
     orchestrator = Orchestrator(
@@ -116,7 +116,7 @@ async def test_guided_cli_status_spinner_is_ascii_safe():
         _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Bright Days is an uplifting pick."
+        for_title="Bright Days", text="Bright Days is an uplifting pick."
     )
 
     orchestrator = Orchestrator(
@@ -168,7 +168,7 @@ async def test_guided_cli_pauses_the_spinner_during_the_confirmation_prompt(monk
         _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Bright Days is an uplifting pick."
+        for_title="Bright Days", text="Bright Days is an uplifting pick."
     )
 
     orchestrator = Orchestrator(
@@ -232,7 +232,7 @@ async def test_guided_cli_status_text_updates_per_pipeline_phase(monkeypatch):
         _PROFILE, title="Bright Days", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Bright Days is an uplifting pick."
+        for_title="Bright Days", text="Bright Days is an uplifting pick."
     )
 
     orchestrator = Orchestrator(

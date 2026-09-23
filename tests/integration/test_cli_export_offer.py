@@ -60,7 +60,7 @@ def _build_orchestrator() -> Orchestrator:
         _PROFILE, title="Quick Laughs", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Quick Laughs is a fun pick."
+        for_title="Quick Laughs", text="Quick Laughs is a fun pick."
     )
     return Orchestrator(
         preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),

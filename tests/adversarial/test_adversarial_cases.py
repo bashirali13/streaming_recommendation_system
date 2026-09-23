@@ -107,6 +107,7 @@ async def test_unsupported_vibe_language_degrades_to_low_confidence_not_a_crash(
         profile, title="Ordinary Film", overview=raw_item["overview"], weak_evidence=True
     )
     recommendation_provider._responses[prompt] = _RationaleOutput(
+        for_title="Ordinary Film",
         text="A reasonable pick, though evidence for the exact vibe is thin.",
         confidence_note="No overview evidence for that descriptor.",
     )
@@ -213,7 +214,9 @@ async def test_near_duplicate_candidates_never_fill_two_roles():
         prompt = build_rationale_prompt(
             profile, title=item["title"], overview=item["overview"], weak_evidence=False
         )
-        recommendation_provider._responses[prompt] = _RationaleOutput(text="A fitting drama.")
+        recommendation_provider._responses[prompt] = _RationaleOutput(
+            for_title=item["title"], text="A fitting drama."
+        )
     orchestrator = Orchestrator(
         preference_agent=PreferenceAgent(
             provider=FakeModelProvider(responses={"x": profile}), max_additional_attempts=2

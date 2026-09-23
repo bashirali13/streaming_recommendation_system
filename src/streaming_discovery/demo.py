@@ -80,7 +80,9 @@ def build_demo_recommendation_provider() -> FakeModelProvider:
         prompt = build_rationale_prompt(
             _PROFILE, title=movie["title"], overview=movie["overview"], weak_evidence=False
         )
-        provider._responses[prompt] = _RationaleOutput(text=_RATIONALES[movie["title"]])
+        provider._responses[prompt] = _RationaleOutput(
+            for_title=movie["title"], text=_RATIONALES[movie["title"]]
+        )
     return provider
 
 

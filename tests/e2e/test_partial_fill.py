@@ -57,7 +57,7 @@ def _build_orchestrator(raw_movies: list[dict], detail_results: dict) -> Orchest
             _PROFILE, title=raw["title"], overview=detail["overview"], weak_evidence=False
         )
         recommendation_provider._responses[prompt] = _RationaleOutput(
-            text=f"{raw['title']} matches your quiet, thoughtful mood."
+            for_title=raw["title"], text=f"{raw['title']} matches your quiet, thoughtful mood."
         )
     return Orchestrator(
         preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),

@@ -97,7 +97,8 @@ async def test_specific_constraint_request_returns_three_distinct_non_excluded_p
             weak_evidence=False,
         )
         recommendation_provider._responses[prompt] = _RationaleOutput(
-            text=f"{title} matches your request for a powerful female lead drama."
+            for_title=title,
+            text=f"{title} matches your request for a powerful female lead drama.",
         )
 
     orchestrator = Orchestrator(

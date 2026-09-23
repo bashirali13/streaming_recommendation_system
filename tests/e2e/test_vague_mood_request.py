@@ -75,6 +75,7 @@ async def test_vague_mood_request_leaves_format_and_providers_unset_and_flags_we
             _PROFILE, title=detail["title"], overview=detail["overview"], weak_evidence=weak
         )
         recommendation_provider._responses[prompt] = _RationaleOutput(
+            for_title=detail["title"],
             text=f"{detail['title']} rationale.",
             confidence_note="Little tone evidence in the overview." if weak else None,
         )

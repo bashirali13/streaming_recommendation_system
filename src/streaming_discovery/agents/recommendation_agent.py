@@ -34,12 +34,37 @@ If "Additional notes from the user" states something to avoid (a
 franchise, studio, character, or similar) and the title or overview
 conflicts with it, say so plainly and prominently -- treat it as a real
 problem with this pick, not a minor caveat.
+
+CRITICAL: set for_title to the exact "Title" given below, copied
+verbatim, and write your rationale ONLY about that exact title. Even if
+you believe a different real movie or show would fit the user's
+preferences better, you must NOT substitute it, mention it as the
+recommendation, or write your rationale as if it were the subject. If
+the given title is a poor match, say so honestly and specifically about
+THIS title -- a weak or negative rationale about the correct title is
+always the right answer; a rationale about a different title never is.
 """
 
 
 class _RationaleOutput(BaseModel):
+    for_title: str
     text: str
     confidence_note: str | None = None
+
+
+_MAX_TITLE_MISMATCH_RETRIES = 1
+"""Bounded, separate from the network-level retry generate_with_retry
+already does for outright call failures (FR-028) -- this is a distinct
+failure mode (a well-formed response about the wrong title), so it gets
+its own, smaller bound rather than reusing max_additional_attempts."""
+
+
+def _normalize_title(title: str) -> str:
+    return title.strip().strip("*_\"'").strip().lower()
+
+
+def _for_title_matches(claimed: str, actual: str) -> bool:
+    return _normalize_title(claimed) == _normalize_title(actual)
 
 
 def build_rationale_prompt(
@@ -236,6 +261,34 @@ class RecommendationAgent:
         prompt = build_rationale_prompt(
             profile, title=candidate.title, overview=candidate.overview, weak_evidence=weak_evidence
         )
+        result = await self._call_rationale_model(prompt)
+        if _for_title_matches(result.for_title, candidate.title):
+            return result
+
+        for _ in range(_MAX_TITLE_MISMATCH_RETRIES):
+            retry_prompt = prompt + (
+                "\n\nCorrection: your previous rationale was about a different "
+                f'title. Write ONLY about "{candidate.title}" this time -- do '
+                "not substitute any other movie or show."
+            )
+            result = await self._call_rationale_model(retry_prompt)
+            if _for_title_matches(result.for_title, candidate.title):
+                return result
+
+        return _RationaleOutput(
+            for_title=candidate.title,
+            text=(
+                f"{candidate.title} is being surfaced as a match for your stated "
+                "preferences, but a detailed written rationale could not be "
+                "reliably generated for it."
+            ),
+            confidence_note=(
+                "This pick's explanation could not be generated reliably; "
+                "treat the match as unverified."
+            ),
+        )
+
+    async def _call_rationale_model(self, prompt: str) -> _RationaleOutput:
         return await generate_with_retry(
             self._provider,
             system_prompt=RATIONALE_SYSTEM_PROMPT,

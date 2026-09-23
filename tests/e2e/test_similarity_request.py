@@ -80,7 +80,7 @@ async def test_similarity_request_sources_candidates_from_similarity_not_generic
             _PROFILE, title=title, overview=detail["overview"], weak_evidence=False
         )
         recommendation_provider._responses[prompt] = _RationaleOutput(
-            text=f"{title} matches your liked titles."
+            for_title=title, text=f"{title} matches your liked titles."
         )
 
     fake_client = FakeTmdbClient(

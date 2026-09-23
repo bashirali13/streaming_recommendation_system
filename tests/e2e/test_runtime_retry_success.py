@@ -57,7 +57,8 @@ async def test_zero_results_triggers_exactly_one_retry_with_runtime_relaxed():
         _PROFILE, title="Quick Laughs", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[prompt] = _RationaleOutput(
-        text="Quick Laughs matches your request for a comedy, once the runtime cap was relaxed."
+        for_title="Quick Laughs",
+        text="Quick Laughs matches your request for a comedy, once the runtime cap was relaxed.",
     )
 
     fake_client = FakeTmdbClient(

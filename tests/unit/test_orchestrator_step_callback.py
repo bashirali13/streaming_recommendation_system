@@ -54,7 +54,7 @@ def _orchestrator(*, discover_sequence=None, discover_results=None) -> Orchestra
         _PROFILE, title="Night Shift", overview=_RAW_MOVIE["overview"], weak_evidence=False
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Night Shift matches your dark, gritty request."
+        for_title="Night Shift", text="Night Shift matches your dark, gritty request."
     )
     return Orchestrator(
         preference_agent=PreferenceAgent(provider=preference_provider, max_additional_attempts=2),

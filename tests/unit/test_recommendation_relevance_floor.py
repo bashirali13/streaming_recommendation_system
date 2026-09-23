@@ -56,7 +56,9 @@ async def test_candidate_with_zero_theme_relevance_is_never_selected_even_if_hig
     rationale_prompt = build_rationale_prompt(
         profile, title=relevant.title, overview=relevant.overview, weak_evidence=False
     )
-    provider._responses[rationale_prompt] = _RationaleOutput(text="A superhero match.")
+    provider._responses[rationale_prompt] = _RationaleOutput(
+        for_title="My Hero Academia: Heroes Rising", text="A superhero match."
+    )
     agent = RecommendationAgent(provider=provider, max_additional_attempts=2)
 
     package = await agent.run(profile, pool)
@@ -75,7 +77,9 @@ async def test_relevance_floor_does_not_gate_when_no_theme_is_stated():
     rationale_prompt = build_rationale_prompt(
         profile, title=candidate.title, overview=candidate.overview, weak_evidence=True
     )
-    provider._responses[rationale_prompt] = _RationaleOutput(text="A decent pick.")
+    provider._responses[rationale_prompt] = _RationaleOutput(
+        for_title="Anything", text="A decent pick."
+    )
     agent = RecommendationAgent(provider=provider, max_additional_attempts=2)
 
     package = await agent.run(profile, pool)
@@ -98,7 +102,9 @@ async def test_setting_descriptor_alone_does_not_gate_the_floor():
     rationale_prompt = build_rationale_prompt(
         profile, title=candidate.title, overview=candidate.overview, weak_evidence=True
     )
-    provider._responses[rationale_prompt] = _RationaleOutput(text="A weak setting match.")
+    provider._responses[rationale_prompt] = _RationaleOutput(
+        for_title="Anything", text="A weak setting match."
+    )
     agent = RecommendationAgent(provider=provider, max_additional_attempts=2)
 
     package = await agent.run(profile, pool)

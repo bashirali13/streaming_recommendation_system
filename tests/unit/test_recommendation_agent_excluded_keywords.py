@@ -62,7 +62,9 @@ async def test_candidate_with_no_excluded_keyword_match_is_not_rejected_by_this_
     rationale_prompt = build_rationale_prompt(
         profile, title=candidate.title, overview=candidate.overview, weak_evidence=False
     )
-    provider._responses[rationale_prompt] = _RationaleOutput(text="A good match.")
+    provider._responses[rationale_prompt] = _RationaleOutput(
+        for_title="My Hero Academia: Heroes Rising", text="A good match."
+    )
     agent = RecommendationAgent(provider=provider, max_additional_attempts=2)
 
     package = await agent.run(profile, pool)

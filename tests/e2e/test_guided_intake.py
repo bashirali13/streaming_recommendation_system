@@ -70,7 +70,7 @@ async def test_guided_intake_shows_only_answered_fields_and_applies_a_correction
         weak_evidence=False,
     )
     recommendation_provider._responses[rationale_prompt] = _RationaleOutput(
-        text="Bright Days is an uplifting pick."
+        for_title="Bright Days", text="Bright Days is an uplifting pick."
     )
 
     orchestrator = Orchestrator(
