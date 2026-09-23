@@ -39,6 +39,16 @@ asked about must make the query fail closed (guaranteed zero results),
 never silently drop the filter and search every provider instead.
 """
 
+_MAX_VIBE_KEYWORD_IDS = 10
+"""Ceiling on resolved TMDB keyword ids per discover() call (T087) --
+tone/setting/theme descriptors are unbounded user input; this keeps
+`with_keywords` from growing without bound."""
+
+_VIBE_SEARCH_STOPWORDS = {"and", "the", "with", "that", "this", "from", "your"}
+"""Skipped during the per-word fallback in `_resolve_vibe_keyword_ids`
+(T087) -- common connective words that would waste a keyword-search call
+and never usefully match a TMDB keyword."""
+
 
 def _match_provider(name: str, table: dict[str, int]) -> int | None:
     """Resolve one user/LLM-given provider name against TMDB's live
@@ -93,6 +103,7 @@ class TmdbClient(Protocol):
         provider_names: list[str],
         included_genres: list[str],
         excluded_genres: list[str],
+        vibe_keywords: list[str],
         year_min: int | None,
         year_max: int | None,
         runtime_max_minutes: int | None,
@@ -100,7 +111,9 @@ class TmdbClient(Protocol):
     ) -> list[dict]:
         """Bulk candidate search. Filters are expressed as TMDB query
         parameters wherever TMDB supports them server-side (FR-029) --
-        genre, year range, provider/region, and (for movies) runtime.
+        genre, year range, provider/region, (for movies) runtime, and
+        (T087) tone/setting/theme descriptors resolved to TMDB keyword
+        ids.
         """
         ...
 
@@ -150,6 +163,7 @@ class RealTmdbClient:
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self._http = http_client
         self._provider_table_cache: dict[tuple[MediaType, str], dict[str, int]] = {}
+        self._keyword_id_cache: dict[str, list[int]] = {}
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -179,6 +193,45 @@ class RealTmdbClient:
         ]
         return resolved or [_IMPOSSIBLE_PROVIDER_ID]
 
+    async def _search_keyword_ids(self, text: str) -> list[int]:
+        """TMDB keyword ids matching a free-text search, cached per exact
+        query string for this client's lifetime (T087) -- avoids
+        re-searching the same descriptor across the movie/tv dual query
+        or a retry that doesn't relax tone.
+        """
+        if text not in self._keyword_id_cache:
+            payload = await self._get_json("/search/keyword", {"query": text})
+            self._keyword_id_cache[text] = [entry["id"] for entry in payload.get("results", [])]
+        return self._keyword_id_cache[text]
+
+    async def _resolve_vibe_keyword_ids(self, vibe_keywords: list[str]) -> list[int]:
+        """One TMDB keyword id per descriptor phrase, at most (T087):
+        search the phrase whole first (TMDB's keyword search already
+        does fuzzy/substring matching); on a miss, fall back to
+        searching its individual words, since a multi-word phrase like
+        "beautiful European architecture" is unlikely to match a TMDB
+        keyword's name exactly but "architecture" alone might. `tone`/
+        `setting`/`theme` descriptors are always soft (data-model.md), so
+        a descriptor with no match at all is simply dropped, not sent
+        through as noise and not treated as a failed hard constraint.
+        """
+        resolved: list[int] = []
+        for phrase in vibe_keywords:
+            ids = await self._search_keyword_ids(phrase)
+            if not ids:
+                for word in phrase.split():
+                    cleaned = word.strip(".,!?\"'").lower()
+                    if len(cleaned) <= 3 or cleaned in _VIBE_SEARCH_STOPWORDS:
+                        continue
+                    ids = await self._search_keyword_ids(cleaned)
+                    if ids:
+                        break
+            if ids:
+                resolved.append(ids[0])
+            if len(resolved) >= _MAX_VIBE_KEYWORD_IDS:
+                break
+        return resolved
+
     async def discover(
         self,
         *,
@@ -187,6 +240,7 @@ class RealTmdbClient:
         provider_names: list[str],
         included_genres: list[str],
         excluded_genres: list[str],
+        vibe_keywords: list[str],
         year_min: int | None,
         year_max: int | None,
         runtime_max_minutes: int | None,
@@ -203,6 +257,10 @@ class RealTmdbClient:
             genre_ids = genre_ids_for_names(included_genres, media_type)
             if genre_ids:
                 params["with_genres"] = ",".join(str(gid) for gid in genre_ids)
+        if vibe_keywords:
+            keyword_ids = await self._resolve_vibe_keyword_ids(vibe_keywords)
+            if keyword_ids:
+                params["with_keywords"] = "|".join(str(kid) for kid in keyword_ids)
         if excluded_genres:
             excluded_ids = genre_ids_for_names(excluded_genres, media_type)
             if excluded_ids:

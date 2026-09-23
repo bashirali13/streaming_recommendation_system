@@ -4,9 +4,14 @@ attempt.
 See specs/001-streaming-discovery-assistant/data-model.md, "DiscoveryQuery".
 
 Derived by the Orchestrator from a PreferenceProfile plus retry state;
-consumed by the Discovery Agent (FR-007, FR-029). Deliberately excludes
-every subjective/free-text field from PreferenceProfile -- that is the
-boundary that keeps the Discovery Agent out of intent interpretation.
+consumed by the Discovery Agent (FR-007, FR-029). `additional_notes` and
+free-form correction text never cross this boundary -- that is what keeps
+the Discovery Agent out of *interpreting* intent (no model call anywhere
+in this pipeline stage, NFR-008). `tone_descriptors`/`setting_descriptors`/
+`theme_descriptors` do cross it, as `vibe_keywords` (T087): not as
+interpretation, but as literal search terms resolved against TMDB's own
+keyword search -- the same class of deterministic, TMDB-server-side
+filtering FR-029 already requires for genre/provider/runtime.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ class DiscoveryQuery(BaseModel):
     region: str
     included_genres: list[str] = Field(default_factory=list)
     excluded_genres: list[str] = Field(default_factory=list)
+    vibe_keywords: list[str] = Field(default_factory=list)
     year_min: int | None = None
     year_max: int | None = None
     runtime_max_minutes: int | None = None

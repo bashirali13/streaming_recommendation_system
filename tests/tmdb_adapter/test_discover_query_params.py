@@ -52,6 +52,7 @@ async def test_discover_sends_numeric_genre_ids_not_names():
         provider_names=[],
         included_genres=["Comedy"],
         excluded_genres=["Horror"],
+        vibe_keywords=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -81,6 +82,7 @@ async def test_discover_drops_an_unrecognized_genre_name_rather_than_sending_it(
         provider_names=[],
         included_genres=["Not A Real Genre"],
         excluded_genres=[],
+        vibe_keywords=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -109,6 +111,7 @@ async def test_discover_resolves_provider_names_to_ids_via_the_watch_providers_e
         provider_names=["Netflix", "Prime"],
         included_genres=[],
         excluded_genres=[],
+        vibe_keywords=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -138,6 +141,7 @@ async def test_discover_apple_tv_resolves_via_substring_match():
         provider_names=["Apple TV"],
         included_genres=[],
         excluded_genres=[],
+        vibe_keywords=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -171,6 +175,7 @@ async def test_discover_fails_closed_when_no_provider_name_resolves():
         provider_names=["Some Totally Unknown Service"],
         included_genres=[],
         excluded_genres=[],
+        vibe_keywords=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
@@ -202,6 +207,7 @@ async def test_discover_caches_the_provider_list_across_calls():
             provider_names=["Netflix"],
             included_genres=[],
             excluded_genres=[],
+            vibe_keywords=[],
             year_min=None,
             year_max=None,
             runtime_max_minutes=None,
@@ -209,3 +215,139 @@ async def test_discover_caches_the_provider_list_across_calls():
         )
 
     assert provider_fetch_count == 1
+
+
+_KEYWORD_RESPONSES = {
+    "fairy tale": {"results": [{"id": 100, "name": "fairy tale"}]},
+    "quirky humor": {"results": []},
+    "quirky": {"results": [{"id": 200, "name": "quirky"}]},
+    "humor": {"results": []},
+}
+
+
+def _keyword_handler(request: httpx.Request) -> httpx.Response:
+    query = request.url.params.get("query", "")
+    return httpx.Response(200, json=_KEYWORD_RESPONSES.get(query, {"results": []}))
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_resolves_vibe_keywords_via_the_keyword_search_endpoint():
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _keyword_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        vibe_keywords=["fairy tale"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["with_keywords"] == "100"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_falls_back_to_per_word_keyword_search_on_a_phrase_miss():
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _keyword_handler(request)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        vibe_keywords=["quirky humor"],  # the whole phrase has no match
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    # "quirky" resolves even though the full phrase and "humor" don't.
+    assert captured_params["with_keywords"] == "200"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_omits_with_keywords_when_nothing_resolves():
+    """Unlike providers, vibe_keywords are always soft (data-model.md):
+    a descriptor with no TMDB keyword match is dropped, not sent through
+    or failed closed.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return httpx.Response(200, json={"results": []})
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        vibe_keywords=["something nobody has ever tagged"],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert "with_keywords" not in captured_params
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_caches_keyword_searches_across_calls():
+    search_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal search_count
+        if "/search/keyword" in str(request.url):
+            search_count += 1
+            return _keyword_handler(request)
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    for _ in range(3):
+        await client.discover(
+            media_type=MediaType.MOVIE,
+            region="US",
+            provider_names=[],
+            included_genres=[],
+            excluded_genres=[],
+            vibe_keywords=["fairy tale"],
+            year_min=None,
+            year_max=None,
+            runtime_max_minutes=None,
+            result_limit=20,
+        )
+
+    assert search_count == 1

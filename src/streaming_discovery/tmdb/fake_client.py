@@ -59,6 +59,12 @@ class FakeTmdbClient:
         self._title_ids = title_ids or {}
         self._failure_mode = failure_mode
         self.details_call_count = 0
+        self.discover_calls: list[dict] = []
+        """Every discover() call's kwargs, in order -- lets a test verify
+        what the Discovery Agent actually passed through (e.g.
+        vibe_keywords, T087), since this fake otherwise ignores query
+        params and just returns fixture data.
+        """
 
     def _maybe_fail(self) -> None:
         if self._failure_mode is None:
@@ -75,12 +81,27 @@ class FakeTmdbClient:
         provider_names: list[str],
         included_genres: list[str],
         excluded_genres: list[str],
+        vibe_keywords: list[str],
         year_min: int | None,
         year_max: int | None,
         runtime_max_minutes: int | None,
         result_limit: int,
     ) -> list[dict]:
         self._maybe_fail()
+        self.discover_calls.append(
+            {
+                "media_type": media_type,
+                "region": region,
+                "provider_names": provider_names,
+                "included_genres": included_genres,
+                "excluded_genres": excluded_genres,
+                "vibe_keywords": vibe_keywords,
+                "year_min": year_min,
+                "year_max": year_max,
+                "runtime_max_minutes": runtime_max_minutes,
+                "result_limit": result_limit,
+            }
+        )
         key = media_type.value
         if key in self._discover_sequence:
             sequence = self._discover_sequence[key]

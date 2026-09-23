@@ -22,6 +22,19 @@ class TestDiscoveryQueryValid:
         )
         assert query.relaxed_constraint is RelaxableConstraint.RUNTIME
 
+    def test_vibe_keywords_defaults_to_empty(self):
+        query = DiscoveryQuery(media_type=MediaType.MOVIE, region="US", retry_number=0)
+        assert query.vibe_keywords == []
+
+    def test_vibe_keywords_accepts_a_list(self):
+        query = DiscoveryQuery(
+            media_type=MediaType.MOVIE,
+            region="US",
+            retry_number=0,
+            vibe_keywords=["fairy tale", "quirky humor"],
+        )
+        assert query.vibe_keywords == ["fairy tale", "quirky humor"]
+
 
 @pytest.mark.contract
 class TestDiscoveryQueryInvalid:

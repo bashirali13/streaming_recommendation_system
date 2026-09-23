@@ -115,3 +115,48 @@ def test_relaxing_runtime_or_year_leaves_included_genres_untouched():
     )
 
     assert retried_query.included_genres == ["Thriller"]
+
+
+def test_vibe_keywords_are_built_from_tone_setting_and_theme_descriptors():
+    """T087: tone/setting/theme descriptors now reach DiscoveryQuery as
+    literal TMDB keyword-search terms (not interpretation -- resolution
+    to TMDB keyword ids happens inside RealTmdbClient), so a vibe-only
+    request actually has something to search TMDB for.
+    """
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE,
+        tone_descriptors=["quirky humor"],
+        setting_descriptors=["European architecture"],
+        theme_descriptors=["fairy tale"],
+    )
+    orchestrator = _orchestrator()
+
+    [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
+
+    assert query.vibe_keywords == ["quirky humor", "European architecture", "fairy tale"]
+
+
+def test_relaxing_tone_also_drops_vibe_keywords_from_the_retry_query():
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE, genres=["Thriller"], tone_descriptors=["dark", "moody"]
+    )
+    orchestrator = _orchestrator()
+
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
+    )
+
+    assert retried_query.vibe_keywords == []
+
+
+def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE, tone_descriptors=["dark"], runtime_max_minutes=100
+    )
+    orchestrator = _orchestrator()
+
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
+    )
+
+    assert retried_query.vibe_keywords == ["dark"]
