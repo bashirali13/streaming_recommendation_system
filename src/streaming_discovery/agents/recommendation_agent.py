@@ -30,6 +30,10 @@ user's stated preferences and that title's overview. Name specific
 matching (and, if relevant, mismatching) factors. Never invent a fact
 about the title that isn't in its overview. If asked to flag weak
 evidence, name the uncertainty plainly rather than overstating the match.
+If "Additional notes from the user" states something to avoid (a
+franchise, studio, character, or similar) and the title or overview
+conflicts with it, say so plainly and prominently -- treat it as a real
+problem with this pick, not a minor caveat.
 """
 
 
@@ -50,6 +54,8 @@ def build_rationale_prompt(
         lines.append(f"Wanted genres: {', '.join(profile.genres)}")
     if descriptors:
         lines.append(f"Wanted tone/setting/themes: {', '.join(descriptors)}")
+    if profile.additional_notes:
+        lines.append(f"Additional notes from the user: {profile.additional_notes}")
     if weak_evidence:
         lines.append("Note: the overview gives little evidence for the requested tone; say so.")
     return "\n".join(lines)
