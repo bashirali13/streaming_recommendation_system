@@ -147,11 +147,37 @@ def _meets_relevance_floor(profile: PreferenceProfile, candidate: CandidateMedia
     return any(d.lower() in haystack for d in profile.theme_descriptors)
 
 
+def _theme_completeness_bonus(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
+    """T102: a candidate satisfying EVERY stated theme_descriptor is
+    strongly preferred over one satisfying only some, even against a
+    realistic vote_average disadvantage. Before this, `_soft_score`'s
+    flat per-hit bonus (1.5 per matched descriptor) meant a fully
+    matching but less popular title could still lose to a more popular
+    title matching only one of several stated themes -- confirmed live
+    against a "road trip and found family" request, where T100 correctly
+    made a real, fully-matching TMDB title discoverable, but it never won
+    a final slot because its theme completeness wasn't worth enough
+    relative to popularity. Scoped to theme_descriptors only (not
+    tone/setting), matching T092's relevance-floor reasoning: theme is
+    the concrete, named-thing-the-user-wants signal, so completing it is
+    what should be rewarded outright; tone/setting stay purely additive
+    via the existing per-hit bonus so a candidate is never penalized for
+    missing a fuzzy mood word.
+    """
+    if not profile.theme_descriptors:
+        return 0.0
+    haystack = " ".join([candidate.overview, *candidate.thematic_keywords]).lower()
+    if all(d.lower() in haystack for d in profile.theme_descriptors):
+        return 4.0
+    return 0.0
+
+
 def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
     score = candidate.vote_average
     score += 2.0 * len(set(profile.genres) & set(candidate.genres))
     descriptor_hits = _descriptor_hit_count(profile, candidate)
     score += 1.5 * descriptor_hits
+    score += _theme_completeness_bonus(profile, candidate)
     if candidate.title in profile.liked_titles:
         score += 3.0
     if candidate.title in profile.disliked_titles:

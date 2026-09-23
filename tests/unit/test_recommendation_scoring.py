@@ -58,6 +58,51 @@ class TestSoftScore:
 
         assert _soft_score(profile, disliked) < disliked.vote_average
 
+    def test_matching_every_stated_theme_outranks_a_more_popular_partial_match(self):
+        """T102: T100 made it possible to actually discover a candidate
+        that satisfies every named theme (e.g. "road trip and found
+        family"), but a flat per-hit bonus wasn't enough to make that
+        discovery worth anything once ranked against a more popular
+        title that only matches one of the two -- confirmed live: a
+        real TMDB title tagged with both themes never won a slot
+        against three well-known titles honestly flagged as only
+        partial matches. A realistic vote_average gap (2 points) must
+        not be enough to overcome full theme completeness.
+        """
+        profile = PreferenceProfile(theme_descriptors=["road trip", "found family"])
+        full_match = _candidate(
+            tmdb_id=1,
+            title="Starguy",
+            overview="A road trip that turns into found family along the way.",
+            vote_average=5.5,
+        )
+        partial_match = _candidate(
+            tmdb_id=2,
+            title="Popular Show",
+            overview="A found family grows close over time.",
+            vote_average=7.5,
+        )
+
+        assert _soft_score(profile, full_match) > _soft_score(profile, partial_match)
+
+    def test_theme_completeness_bonus_requires_every_theme_not_just_more_hits(self):
+        """Guards against the bonus being satisfied by hit *count* alone
+        -- two hits on the same repeated theme must not count as
+        "every theme" when a different theme was also stated and missed.
+        """
+        profile = PreferenceProfile(theme_descriptors=["road trip", "found family"])
+        one_theme_twice = _candidate(
+            title="Road Movie",
+            overview="A road trip. Just a road trip, entirely about the road trip.",
+        )
+        both_themes_once = _candidate(
+            tmdb_id=2,
+            title="Starguy",
+            overview="A road trip that turns into found family.",
+        )
+
+        assert _soft_score(profile, both_themes_once) > _soft_score(profile, one_theme_twice)
+
     def test_candidate_thematically_similar_to_a_disliked_title_is_deprioritized(self):
         """A candidate is never named after the disliked title (Discovery
         already hard-excludes an exact match), but shares its name as a
