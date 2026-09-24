@@ -395,3 +395,21 @@ class TestDeduplicate:
         result = _deduplicate(ranked)
 
         assert [c.tmdb_id for c in result] == [1, 2]
+
+
+class TestUnknownGenresAreNotEnforced:
+    def test_a_genre_tmdb_does_not_have_is_not_required_of_candidates(self):
+        """Discovery ignores a genre name TMDB doesn't know (there is nothing
+        to send), so the recheck must ignore it too -- otherwise a stray
+        "Superhero" would reject every candidate and turn a harmless miss
+        into "no matches" (T112)."""
+        profile = PreferenceProfile(genres=["Superhero", "Drama"])
+        drama = _candidate(genres=["Drama"])
+
+        assert _hard_filter(profile, [drama]) == [drama]
+
+    def test_known_genres_are_still_required_alongside_an_unknown_one(self):
+        profile = PreferenceProfile(genres=["Superhero", "Drama"])
+        comedy = _candidate(genres=["Comedy"])
+
+        assert _hard_filter(profile, [comedy]) == []

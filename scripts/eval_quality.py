@@ -234,6 +234,60 @@ GOLD: list[dict] = [
     },
 ]
 
+# Prompts written after the fixes above, never used to tune anything. Run with
+# --holdout to see whether the gains carry over to requests the system was not
+# developed against.
+HOLDOUT: list[dict] = [
+    {"p": "Something with time travel on Netflix", "providers": ["netflix"]},
+    {
+        "p": "A funny movie the whole family can watch, under 90 minutes",
+        "mood": "funny and family-friendly",
+        "media": "movie",
+        "runtime_max": 90,
+    },
+    {
+        "p": "Thriller series on Hulu from after 2015",
+        "media": "tv",
+        "providers": ["hulu"],
+        "genres": ["Thriller"],
+        "year_min": [2015, 2016],
+    },
+    {
+        "p": "A sad drama movie from the 2000s",
+        "mood": "sad",
+        "media": "movie",
+        "genres": ["Drama"],
+        "year_min": [2000],
+        "year_max": [2009],
+    },
+    {"p": "Musical movies", "media": "movie", "genres": ["Music"]},
+    {"p": "A history documentary series", "media": "tv", "genres": ["Documentary", "History"]},
+    {"p": "An uplifting sports movie", "mood": "uplifting", "media": "movie"},
+    {
+        "p": "A slow, moody Scandinavian crime series",
+        "mood": "slow and moody",
+        "media": "tv",
+        "genres": ["Crime"],
+    },
+    {
+        "p": "An adventure movie for the whole family on Disney Plus",
+        "media": "movie",
+        "providers": ["disney"],
+        "genres": ["Adventure", "Family"],
+    },
+    {
+        "p": "Romance movie on Prime Video after 2005 and under 110 minutes",
+        "media": "movie",
+        "providers": ["prime"],
+        "genres": ["Romance"],
+        "year_min": [2005, 2006],
+        "runtime_max": 110,
+    },
+    {"p": "A horror movie set in space", "media": "movie", "genres": ["Horror"]},
+    {"p": "Something gentle and warm to watch with my grandmother", "mood": "gentle and warm"},
+]
+
+
 # Genres that TMDB only offers as a combined TV genre, or not at all on TV.
 _TV_GENRE_ALIASES = {
     "science fiction": ["sci-fi & fantasy"],
@@ -405,8 +459,10 @@ async def _run_one(sem, g: dict) -> dict:
         return out
 
 
-async def main(core_only: bool, show: bool) -> None:
-    gold = [g for g in GOLD if not (core_only and g.get("tier") == "stretch")]
+async def main(core_only: bool, show: bool, holdout: bool = False) -> None:
+    gold = (
+        HOLDOUT if holdout else [g for g in GOLD if not (core_only and g.get("tier") == "stretch")]
+    )
     sem = asyncio.Semaphore(4)
     results = await asyncio.gather(*(_run_one(sem, g) for g in gold))
 
@@ -491,6 +547,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--core", action="store_true")
     ap.add_argument("--show", action="store_true")
+    ap.add_argument("--holdout", action="store_true")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(main(a.core, a.show))
+    asyncio.run(main(a.core, a.show, a.holdout))

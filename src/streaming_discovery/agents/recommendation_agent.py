@@ -32,7 +32,12 @@ from streaming_discovery.contracts.recommendation_package import (
     RecommendationPackage,
 )
 from streaming_discovery.llm.provider import ModelCallError, ModelProvider, generate_with_retry
-from streaming_discovery.tmdb.normalize import TV_GENRE_ALIASES, TV_GENRE_KEYWORDS
+from streaming_discovery.tmdb.normalize import (
+    MOVIE_GENRES,
+    TV_GENRE_ALIASES,
+    TV_GENRE_KEYWORDS,
+    TV_GENRES,
+)
 
 RATIONALE_SYSTEM_PROMPT = """\
 You write a short, concrete rationale for one recommended title, given a
@@ -148,6 +153,14 @@ def _mentions_excluded_keyword(profile: PreferenceProfile, candidate: CandidateM
     return any(term.lower() in haystack for term in profile.excluded_keywords)
 
 
+_KNOWN_GENRES = (
+    {name.lower() for name in MOVIE_GENRES.values()}
+    | {name.lower() for name in TV_GENRES.values()}
+    | set(TV_GENRE_ALIASES)
+    | set(TV_GENRE_KEYWORDS)
+)
+
+
 def _carries_genre(candidate: CandidateMedia, genre: str) -> bool:
     wanted = genre.lower()
     have = {g.lower() for g in candidate.genres}
@@ -177,7 +190,9 @@ def _on_requested_provider(candidate: CandidateMedia, providers: list[str]) -> b
 def _breaks_a_stated_fact(
     profile: PreferenceProfile, candidate: CandidateMedia, relaxed: RelaxableConstraint | None
 ) -> bool:
-    if any(not _carries_genre(candidate, genre) for genre in profile.genres):
+    # A genre name TMDB doesn't have was never sent to it, so it isn't required here either.
+    known = [genre for genre in profile.genres if genre.lower() in _KNOWN_GENRES]
+    if any(not _carries_genre(candidate, genre) for genre in known):
         return True
     year = candidate.release_year
     if year is not None and relaxed is not RelaxableConstraint.YEAR_RANGE:

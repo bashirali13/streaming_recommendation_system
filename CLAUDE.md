@@ -59,5 +59,6 @@ From `spec.md`'s Non-Goals and the constitution's Technology & Architectural Con
 ## Running things
 
 - `pytest` — full suite. Should pass with zero live network/model calls at all times.
+- `uv run python scripts/eval_quality.py` (`--holdout` for the unseen set) -- live end-to-end quality check against a fixed set of prompts; needs real credentials, so it is not part of `pytest`. Run it after changing anything between the user's words and the TMDB request.
 - `ruff check` / `ruff format` — lint/format before committing.
 - See `specs/001-streaming-discovery-assistant/quickstart.md` for the 10 scenario walkthroughs (demo-mode, fixture-backed) that double as the project's own acceptance demo.

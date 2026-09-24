@@ -331,6 +331,24 @@ Mood fit (picks that fit the stated mood, judged by a fresh model call): 15/27 (
 - [x] T116 Mood words ("sweet", "cozy", "heartwarming") cannot be TMDB filters, and they were barely used for ranking either: a literal word match in an overview almost never happens, so "a cozy comfort watch" returned the same popular titles as "show me something" and "a heartwarming romance" included an erotic thriller. After the stated facts have narrowed the pool, the Recommendation Agent now makes one batched model call scoring how well each of the best-ranked titles (up to 24) fits the mood, from only that title's genres, keywords and overview (0-3), and the score is a strong ranking signal within a theme tier. It can only reorder valid answers, never remove one; it is skipped when there is no mood or three or fewer candidates; a failed call just means no mood bonus. A title the mood judge rates 2+ is no longer flagged as weak evidence. `FakeModelProvider` gained per-output-type defaults so tests need not hand-write judge prompts. Tests first (`test_mood_ranking.py`).
 - [x] T117 Keyword lookup took TMDB's first search hit: searching "horror" returns "b-horror" (1 TV show) ahead of "horror" itself (500), so "a finished scary miniseries" matched 1 show instead of 82. An exact-name match now comes first. Tests first.
 - [x] T118 "Anime series" returned *Rick and Morty* and *Regular Show*: the prompt treated "anime" as any animation. It now means the Animation genre and the Japanese language. The gold set entry was tightened to check the language too.
+- [x] T119 The fact recheck (T112) required every requested genre, but discovery ignores a genre name TMDB does not have (nothing to send). A stray name such as "Superhero" would therefore have rejected every candidate and turned a harmless miss into "no matches". The recheck now enforces only genres TMDB knows. Tests first.
+
+### Result of the quality pass
+
+Final state on the full gold set (39 prompts), and on 12 fresh prompts written after the fixes and never used to tune anything (`--holdout`):
+
+| | Baseline | Final: gold set | Final: hold-out |
+|---|---|---|---|
+| Core prompts fully right | 22/33 (66%) | 33/33 (100%) | 12/12 (100%) |
+| Stretch prompts fully right | 3/6 | 6/6 | n/a |
+| >=3 picks without relaxing | 32/39 | 39/39 | 12/12 |
+| Retries that relaxed something | 2 | 0 | 0 |
+| Picks satisfying the stated facts | 82% | 100% | 100% |
+| Picks fitting the stated mood | 55% | 74-88% (two runs) | 73% |
+
+Run it with `uv run python scripts/eval_quality.py [--core] [--show] [--holdout]` (needs credentials). The "fully right" checks cover only stated *facts*; mood fit is judged by the same model the tool uses, so treat it as a rough measure and note it varies between runs.
+
+**Known gaps** (observed, not fixed): (1) nationality or origin requests ("Scandinavian crime series") are silently dropped: the profile has no country field, though TMDB has `with_origin_country`; the gold checks did not catch it, only reading the picks did. (2) The profile also has no slot for cast, certification, rating, TV finished/ongoing or miniseries, or a positive studio, so those requests are only approximated (see the intent analysis in this session's notes: about half of misrouted intent had no slot). (3) TV runtime is never enforced (TMDB's TV runtime data is mostly empty). (4) TMDB's TV "romance" and "history" keyword stand-ins are applied loosely, so TV results for those genres are only as good as ranking. (5) A bare genre request ("romance") returns the popular titles carrying that genre. (6) Similar-titles quality is modest.
 
 The eval now also reports **mood fit**: for the nine prompts that state a mood, a fresh model call sees only each pick's own details and says whether it fits. It is the same model the tool uses, so it is a rough measure. Baseline at this point: **15/27 picks (55%) fit the requested mood**; "cozy comfort watch" and "heartwarming romance" scored 0/3.
 
