@@ -811,3 +811,104 @@ async def test_discover_sends_no_monetization_filter_when_no_provider_was_named(
     )
 
     assert "with_watch_monetization_types" not in captured_params
+
+
+async def _discover_tv(client, *, genres, vibe_keywords=()):
+    return await client.discover(
+        media_type=MediaType.TV,
+        region="US",
+        provider_names=[],
+        included_genres=list(genres),
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=list(vibe_keywords),
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+
+def _capturing_client():
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return _multi_keyword_handler(request)
+        calls.append(dict(request.url.params))
+        results = [{"id": i} for i in range(12)]
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": results})
+
+    return _client_with_handler(handler), calls
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_tv_science_fiction_is_sent_as_the_combined_tv_genre():
+    client, calls = _capturing_client()
+
+    await _discover_tv(client, genres=["Science Fiction"])
+
+    assert calls[0]["with_genres"] == "10765"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_a_genre_tv_lacks_is_sent_as_its_keyword_not_dropped():
+    """T113: "a romance TV series" used to send no genre at all, so the
+    request matched every kind of show."""
+    client, calls = _capturing_client()
+
+    await _discover_tv(client, genres=["Romance"])
+
+    assert calls[0]["with_keywords"] == "9840"
+    assert "with_genres" not in calls[0]
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_real_tv_genres_and_keyword_stand_ins_are_combined():
+    client, calls = _capturing_client()
+
+    await _discover_tv(client, genres=["Comedy", "Romance"])
+
+    assert calls[0]["with_genres"] == "35"
+    assert calls[0]["with_keywords"] == "9840"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_the_genre_keyword_takes_precedence_over_soft_theme_keywords_on_tv():
+    """TMDB's `with_keywords` takes one separator per call, so the stated
+    genre wins and the (soft) theme keywords stay ranking-only for TV."""
+    client, calls = _capturing_client()
+
+    await _discover_tv(client, genres=["Romance"], vibe_keywords=["road trip"])
+
+    assert len(calls) == 1
+    assert calls[0]["with_keywords"] == "9840"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_movies_never_use_genre_keyword_stand_ins():
+    client, calls = _capturing_client()
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=["Romance"],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert calls[0]["with_genres"] == "10749"
+    assert "with_keywords" not in calls[0]

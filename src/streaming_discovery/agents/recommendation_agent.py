@@ -29,6 +29,7 @@ from streaming_discovery.contracts.recommendation_package import (
     RecommendationPackage,
 )
 from streaming_discovery.llm.provider import ModelProvider, generate_with_retry
+from streaming_discovery.tmdb.normalize import TV_GENRE_ALIASES, TV_GENRE_KEYWORDS
 
 RATIONALE_SYSTEM_PROMPT = """\
 You write a short, concrete rationale for one recommended title, given a
@@ -107,18 +108,6 @@ def _mentions_excluded_keyword(profile: PreferenceProfile, candidate: CandidateM
     return any(term.lower() in haystack for term in profile.excluded_keywords)
 
 
-# TMDB's TV genres are a different, smaller list than its movie genres: a few
-# are combined, and Romance/Horror/Thriller/History/Music do not exist.
-_TV_GENRE_ALIASES = {
-    "science fiction": ("sci-fi & fantasy",),
-    "fantasy": ("sci-fi & fantasy",),
-    "action": ("action & adventure",),
-    "adventure": ("action & adventure",),
-    "war": ("war & politics",),
-}
-_GENRES_TV_LACKS = {"romance", "horror", "thriller", "history", "music"}
-
-
 def _carries_genre(candidate: CandidateMedia, genre: str) -> bool:
     wanted = genre.lower()
     have = {g.lower() for g in candidate.genres}
@@ -126,11 +115,11 @@ def _carries_genre(candidate: CandidateMedia, genre: str) -> bool:
         return True
     if candidate.media_type is not MediaType.TV:
         return False
-    if any(alias in have for alias in _TV_GENRE_ALIASES.get(wanted, ())):
+    alias = TV_GENRE_ALIASES.get(wanted)
+    if alias and alias.lower() in have:
         return True
-    if wanted in _GENRES_TV_LACKS:
-        return any(wanted in keyword.lower() for keyword in candidate.thematic_keywords)
-    return False
+    stand_in = TV_GENRE_KEYWORDS.get(wanted)
+    return bool(stand_in) and stand_in[1] in {k.lower() for k in candidate.thematic_keywords}
 
 
 def _squash(name: str) -> str:

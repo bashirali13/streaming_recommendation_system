@@ -6,7 +6,11 @@ and correctly scopes provider data to one region + flatrate offers only
 import pytest
 
 from streaming_discovery.contracts.enums import MediaType
-from streaming_discovery.tmdb.normalize import genre_ids_for_names, normalize_candidate
+from streaming_discovery.tmdb.normalize import (
+    genre_ids_for_names,
+    normalize_candidate,
+    tv_genre_keyword_ids,
+)
 
 _RAW_MOVIE_LIST_ITEM = {
     "id": 550,
@@ -213,3 +217,36 @@ class TestGenreIdsForNames:
 
     def test_empty_input_returns_empty_list(self):
         assert genre_ids_for_names([], MediaType.MOVIE) == []
+
+    def test_tv_science_fiction_and_fantasy_use_the_combined_tv_genre(self):
+        """T113: TMDB has no separate Science Fiction or Fantasy genre for
+        TV, only "Sci-Fi & Fantasy" -- asking for either used to drop the
+        genre and return every kind of show."""
+        assert genre_ids_for_names(["Science Fiction"], MediaType.TV) == [10765]
+        assert genre_ids_for_names(["Fantasy"], MediaType.TV) == [10765]
+
+    def test_tv_genres_that_share_a_combined_genre_are_not_repeated(self):
+        assert genre_ids_for_names(["Science Fiction", "Fantasy"], MediaType.TV) == [10765]
+
+    def test_tv_action_adventure_and_war_use_their_combined_genres(self):
+        assert genre_ids_for_names(["Action"], MediaType.TV) == [10759]
+        assert genre_ids_for_names(["Adventure"], MediaType.TV) == [10759]
+        assert genre_ids_for_names(["War"], MediaType.TV) == [10768]
+
+    def test_movie_genres_are_unchanged_by_the_tv_aliases(self):
+        assert genre_ids_for_names(["Science Fiction", "Fantasy"], MediaType.MOVIE) == [878, 14]
+
+
+@pytest.mark.tmdb_adapter
+class TestTvGenreKeywordIds:
+    """TMDB has no Romance, Horror, Thriller, History or Music genre for TV;
+    the closest thing is a keyword with the same name (T113)."""
+
+    def test_genres_tv_lacks_resolve_to_their_keyword(self):
+        assert tv_genre_keyword_ids(["Romance", "Horror"]) == [9840, 315058]
+
+    def test_genres_tv_has_need_no_keyword(self):
+        assert tv_genre_keyword_ids(["Drama", "Science Fiction"]) == []
+
+    def test_is_case_insensitive(self):
+        assert tv_genre_keyword_ids(["thriller"]) == [316362]

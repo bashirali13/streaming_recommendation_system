@@ -65,17 +65,59 @@ def _genre_names(genre_ids: list[int], media_type: MediaType) -> list[str]:
     return [table[gid] for gid in genre_ids if gid in table]
 
 
+# TMDB's TV genres are a different, smaller list than its movie genres (T113).
+# A few movie genres exist on TV only as a combined genre...
+TV_GENRE_ALIASES: dict[str, str] = {
+    "science fiction": "Sci-Fi & Fantasy",
+    "fantasy": "Sci-Fi & Fantasy",
+    "action": "Action & Adventure",
+    "adventure": "Action & Adventure",
+    "war": "War & Politics",
+}
+
+# ...and a few do not exist on TV at all. The closest TMDB offers is a keyword
+# of the same name: (keyword id, keyword name), each an exact-name match with
+# hundreds of TV shows (checked against live TMDB).
+TV_GENRE_KEYWORDS: dict[str, tuple[int, str]] = {
+    "romance": (9840, "romance"),
+    "horror": (315058, "horror"),
+    "thriller": (316362, "thriller"),
+    "history": (282633, "history"),
+    "music": (283297, "music"),
+}
+
+
 def genre_ids_for_names(genre_names: list[str], media_type: MediaType) -> list[int]:
     """The inverse of `_genre_names` (T086): TMDB's discover endpoint
     requires numeric genre ids for `with_genres`/`without_genres`, not
     names -- resolved here, case-insensitively, against the same static
     table `_genre_names` uses, so the two directions can never drift
-    apart. A name that isn't one of TMDB's known genres for this media
-    type is dropped rather than sent through as meaningless noise.
+    apart. For TV, a genre that only exists as a combined TV genre resolves
+    to it (T113). A name that isn't one of TMDB's known genres for this media
+    type is dropped rather than sent through as meaningless noise, and an id
+    is never repeated.
     """
     table = MOVIE_GENRES if media_type is MediaType.MOVIE else TV_GENRES
     name_to_id = {name.lower(): gid for gid, name in table.items()}
-    return [name_to_id[name.lower()] for name in genre_names if name.lower() in name_to_id]
+    ids: list[int] = []
+    for name in genre_names:
+        key = name.lower()
+        if media_type is not MediaType.MOVIE:
+            key = TV_GENRE_ALIASES.get(key, name).lower()
+        if key in name_to_id and name_to_id[key] not in ids:
+            ids.append(name_to_id[key])
+    return ids
+
+
+def tv_genre_keyword_ids(genre_names: list[str]) -> list[int]:
+    """TMDB keyword ids standing in for the requested genres that TV has no
+    genre for (T113) -- Romance, Horror, Thriller, History, Music."""
+    ids: list[int] = []
+    for name in genre_names:
+        entry = TV_GENRE_KEYWORDS.get(name.lower())
+        if entry and entry[0] not in ids:
+            ids.append(entry[0])
+    return ids
 
 
 def _release_year(raw: dict, media_type: MediaType) -> int | None:

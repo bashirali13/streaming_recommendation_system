@@ -21,7 +21,7 @@ import httpx
 
 from streaming_discovery.contracts.candidate_pool import TmdbErrorInfo
 from streaming_discovery.contracts.enums import MediaType
-from streaming_discovery.tmdb.normalize import genre_ids_for_names
+from streaming_discovery.tmdb.normalize import genre_ids_for_names, tv_genre_keyword_ids
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -398,6 +398,16 @@ class RealTmdbClient:
             language_code = await self._resolve_language_code(languages)
             if language_code is not None:
                 params["with_original_language"] = language_code
+
+        genre_keyword_ids = (
+            tv_genre_keyword_ids(included_genres) if media_type is MediaType.TV else []
+        )
+        if genre_keyword_ids:
+            # TV has no genre for these, so the keyword stands in for it. TMDB's
+            # `with_keywords` takes one separator per call, so the stated genre
+            # wins and soft theme keywords stay ranking-only for this query.
+            params["with_keywords"] = ",".join(str(k) for k in genre_keyword_ids)
+            return await self._paginate(endpoint, params, result_limit=result_limit)
 
         if vibe_keywords:
             keyword_ids = await self._resolve_keyword_ids(vibe_keywords)
