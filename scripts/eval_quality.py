@@ -24,8 +24,10 @@ import sys
 from collections import Counter
 from datetime import date
 
+from pydantic import BaseModel
+
 from streaming_discovery.agents.recommendation_agent import RecommendationAgent, _RationaleOutput
-from streaming_discovery.cli.output import build_orchestrator
+from streaming_discovery.cli.output import _RealModelProvider, build_orchestrator
 from streaming_discovery.config import Settings
 
 Y = date.today().year
@@ -155,21 +157,34 @@ GOLD: list[dict] = [
     {"p": "Horror TV show", "media": "tv", "genres": ["Horror"]},
     # ---- facts plus mood words (the case that broke)
     {
+        "mood": "sweet and passionate",
         "p": "A sweet, passionate romance movie on Netflix",
         "media": "movie",
         "providers": ["netflix"],
         "genres": ["Romance"],
     },
     {
+        "mood": "cozy and funny",
         "p": "Something cozy and funny: a comedy movie on Hulu",
         "media": "movie",
         "providers": ["hulu"],
         "genres": ["Comedy"],
     },
-    {"p": "A dark, gritty crime thriller movie", "media": "movie", "genres": ["Crime", "Thriller"]},
-    {"p": "A feel-good family movie", "media": "movie", "genres": ["Family"]},
-    {"p": "An atmospheric, slow-burn mystery TV show", "media": "tv", "genres": ["Mystery"]},
     {
+        "mood": "dark and gritty",
+        "p": "A dark, gritty crime thriller movie",
+        "media": "movie",
+        "genres": ["Crime", "Thriller"],
+    },
+    {"mood": "feel-good", "p": "A feel-good family movie", "media": "movie", "genres": ["Family"]},
+    {
+        "mood": "atmospheric and slow-burn",
+        "p": "An atmospheric, slow-burn mystery TV show",
+        "media": "tv",
+        "genres": ["Mystery"],
+    },
+    {
+        "mood": "heartwarming",
         "p": "A romantic movie, something heartwarming, under 2 hours",
         "media": "movie",
         "genres": ["Romance"],
@@ -177,6 +192,7 @@ GOLD: list[dict] = [
     },
     {"p": "Romance", "genres": ["Romance"]},
     {
+        "mood": "passionate",
         "p": "A passionate romance, Netflix or Hulu, after 1991",
         "providers": ["netflix", "hulu"],
         "genres": ["Romance"],
@@ -197,7 +213,7 @@ GOLD: list[dict] = [
         "providers": ["hulu"],
     },
     {"p": "Show me something to watch tonight", "tier": "stretch"},
-    {"p": "A cozy comfort watch", "tier": "stretch"},
+    {"mood": "cozy and comforting", "p": "A cozy comfort watch", "tier": "stretch"},
     {
         "p": "Surprise me with a well-reviewed movie from the 90s",
         "tier": "stretch",
@@ -206,6 +222,7 @@ GOLD: list[dict] = [
         "year_max": [1999],
     },
     {
+        "mood": "mind-bending",
         "p": "A mind-bending sci-fi movie",
         "tier": "stretch",
         "media": "movie",
@@ -221,6 +238,36 @@ _TV_GENRE_ALIASES = {
     "adventure": ["action & adventure"],
     "war": ["war & politics"],
 }
+
+
+class _Fit(BaseModel):
+    fits: bool
+
+
+async def _mood_fits(judge, mood: str, c) -> bool:
+    """A coarse, independent check: one fresh model call that sees only the
+    title's own details, not the ranking. It is the same model as the tool
+    uses, so read it as a rough measure, not ground truth."""
+    lines = [
+        f"Requested mood: {mood}",
+        f"Title: {c.title} ({c.release_year})",
+        f"Genres: {', '.join(c.genres)}",
+        f"Keywords: {', '.join(c.thematic_keywords[:10])}",
+        f"Overview: {c.overview}",
+    ]
+    prompt = "\n".join(lines)
+    try:
+        out = await judge.generate(
+            system_prompt=(
+                "You judge whether a movie or show fits a requested mood, using only the "
+                "details given. Answer fits=true only if those details show the mood."
+            ),
+            user_prompt=prompt,
+            output_type=_Fit,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return out.fits
 
 
 class _StubRationale:
@@ -317,6 +364,15 @@ async def _run_once(g: dict) -> dict:
     for pick in (pkg.best_match, pkg.safe_pick, pkg.wildcard_pick):
         if pick:
             out["picks"].append((pick.candidate, _pick_problems(pick.candidate, g)))
+    out["mood_fit"] = None
+    if g.get("mood") and out["picks"]:
+        judge = _RealModelProvider(
+            model_name=Settings().model_name,
+            api_key=Settings().openrouter_api_key,
+            temperature=0.0,
+        )
+        fits = [await _mood_fits(judge, g["mood"], c) for c, _ in out["picks"]]
+        out["mood_fit"] = (sum(fits), len(fits))
     return out
 
 
@@ -378,6 +434,8 @@ async def main(core_only: bool, show: bool) -> None:
         print(f"\n=== {tier.upper()} ===")
         for clean, r, enough, problems in rows[tier]:
             print(line(clean, r, enough, problems))
+            if r.get("mood_fit"):
+                print(f"        mood '{r['g']['mood']}': {r['mood_fit'][0]}/{r['mood_fit'][1]} fit")
             if show:
                 for c, ps in r["picks"]:
                     print(
@@ -401,6 +459,10 @@ async def main(core_only: bool, show: bool) -> None:
         f">=3 picks, no relaxing   : "
         f"{sum(1 for x in allr if x[2] and not x[1]['relaxed'])}/{len(allr)}"
     )
+    mood = [x[1]["mood_fit"] for x in allr if x[1].get("mood_fit")]
+    if mood:
+        fit, total = sum(m[0] for m in mood), sum(m[1] for m in mood)
+        print(f"picks that fit the requested mood: {fit}/{total} = {100 * fit // total}%")
     print(f"needed a relaxed retry   : {sum(1 for x in allr if x[1]['relaxed'])}/{len(allr)}")
     print(
         f"picks satisfying request : {n_pick_ok}/{n_picks} = {100 * n_pick_ok // max(1, n_picks)}%"

@@ -8,11 +8,15 @@ Deterministic (NFR-008): no language-model call anywhere in this module.
 
 from __future__ import annotations
 
+import asyncio
+
 from streaming_discovery.contracts.candidate_media import CandidateMedia
 from streaming_discovery.contracts.candidate_pool import CandidatePool
 from streaming_discovery.contracts.discovery_query import DiscoveryQuery
 from streaming_discovery.tmdb.client import TmdbAdapterError, TmdbClient
 from streaming_discovery.tmdb.normalize import MOVIE_GENRES, TV_GENRES, normalize_candidate
+
+_MAX_CONCURRENT_DETAIL_LOOKUPS = 8
 
 
 def _mentions_excluded_person(detail: dict, excluded_person_ids: list[int]) -> bool:
@@ -82,6 +86,16 @@ def _survives_hard_filter(raw_item: dict, query: DiscoveryQuery) -> bool:
     return True
 
 
+def _states_facts_similar_cannot_honor(query: DiscoveryQuery) -> bool:
+    return bool(
+        query.provider_names
+        or query.year_min is not None
+        or query.year_max is not None
+        or query.runtime_max_minutes is not None
+        or query.languages
+    )
+
+
 class DiscoveryAgent:
     """Consumes a `DiscoveryQuery`, produces a `CandidatePool`. Never
     receives a `PreferenceProfile` directly, never interprets ambiguous
@@ -97,20 +111,7 @@ class DiscoveryAgent:
             if query.similarity_seed_titles:
                 raw_items = await self._discover_via_similarity(query)
             else:
-                raw_items = await self._tmdb.discover(
-                    media_type=query.media_type,
-                    region=query.region,
-                    provider_names=query.provider_names,
-                    included_genres=query.included_genres,
-                    excluded_genres=query.excluded_genres,
-                    excluded_keywords=query.excluded_keywords,
-                    vibe_keywords=query.vibe_keywords,
-                    languages=query.languages,
-                    year_min=query.year_min,
-                    year_max=query.year_max,
-                    runtime_max_minutes=query.runtime_max_minutes,
-                    result_limit=query.result_limit,
-                )
+                raw_items = await self._discover(query, query.included_genres)
         except TmdbAdapterError as exc:
             return CandidatePool(candidates=[], retry_number=query.retry_number, error=exc.error)
 
@@ -122,14 +123,13 @@ class DiscoveryAgent:
             else []
         )
 
+        try:
+            details = await self._fetch_details(query, survivors)
+        except TmdbAdapterError as exc:
+            return CandidatePool(candidates=[], retry_number=query.retry_number, error=exc.error)
+
         candidates: list[CandidateMedia] = []
-        for item in survivors:
-            try:
-                detail = await self._tmdb.details(media_type=query.media_type, tmdb_id=item["id"])
-            except TmdbAdapterError as exc:
-                return CandidatePool(
-                    candidates=[], retry_number=query.retry_number, error=exc.error
-                )
+        for item, detail in zip(survivors, details, strict=True):
             if _mentions_excluded_company(detail, query):
                 continue
             if _mentions_excluded_person(detail, excluded_person_ids):
@@ -165,14 +165,46 @@ class DiscoveryAgent:
             relaxed_constraint=query.relaxed_constraint,
         )
 
+    async def _fetch_details(self, query: DiscoveryQuery, items: list[dict]) -> list[dict]:
+        """Detail lookups for every survivor, a few at a time (T114), in the
+        survivors' own order. The first TMDB failure is raised."""
+        limit = asyncio.Semaphore(_MAX_CONCURRENT_DETAIL_LOOKUPS)
+
+        async def one(item: dict) -> dict:
+            async with limit:
+                return await self._tmdb.details(media_type=query.media_type, tmdb_id=item["id"])
+
+        return list(await asyncio.gather(*(one(item) for item in items)))
+
+    async def _discover(self, query: DiscoveryQuery, included_genres: list[str]) -> list[dict]:
+        return await self._tmdb.discover(
+            media_type=query.media_type,
+            region=query.region,
+            provider_names=query.provider_names,
+            included_genres=included_genres,
+            excluded_genres=query.excluded_genres,
+            excluded_keywords=query.excluded_keywords,
+            vibe_keywords=query.vibe_keywords,
+            languages=query.languages,
+            year_min=query.year_min,
+            year_max=query.year_max,
+            runtime_max_minutes=query.runtime_max_minutes,
+            result_limit=query.result_limit,
+        )
+
     async def _discover_via_similarity(self, query: DiscoveryQuery) -> list[dict]:
         """When the user named liked titles (User Story 3), source
-        candidates from TMDB's similar-title lookups for those titles
-        instead of a generic discover query -- title -> id resolution,
-        then similar(), merged and de-duplicated by id.
+        candidates from TMDB's similar-title lookups for those titles --
+        title -> id resolution, then similar(), merged and de-duplicated
+        by id. TMDB's similar list is unfiltered, so when the user also
+        stated facts it cannot honor (a service, years, a runtime, a
+        language) a filtered discover query, built from the seed's own
+        genres unless the user named some, is added after it (T115).
         """
         seen_ids: set[int] = set()
         merged: list[dict] = []
+        seed_genres: list[str] = []
+        wants_filters = _states_facts_similar_cannot_honor(query)
         for title in query.similarity_seed_titles:
             seed_id = await self._tmdb.search_title(media_type=query.media_type, title=title)
             if seed_id is None:
@@ -184,4 +216,13 @@ class DiscoveryAgent:
                 if item["id"] not in seen_ids:
                     seen_ids.add(item["id"])
                     merged.append(item)
-        return merged[: query.result_limit]
+            if wants_filters and not query.included_genres:
+                seed = await self._tmdb.details(media_type=query.media_type, tmdb_id=seed_id)
+                for genre in seed.get("genres", []):
+                    if genre["name"] not in seed_genres:
+                        seed_genres.append(genre["name"])
+        merged = merged[: query.result_limit]
+        if wants_filters:
+            filtered = await self._discover(query, query.included_genres or seed_genres[:2])
+            merged.extend(item for item in filtered if item["id"] not in seen_ids)
+        return merged

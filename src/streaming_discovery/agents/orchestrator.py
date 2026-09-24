@@ -117,7 +117,7 @@ class Orchestrator:
         discovery_agent: DiscoveryAgentLike,
         recommendation_agent: RecommendationAgentLike | None = None,
         region: str,
-        result_limit: int = 20,
+        result_limit: int = 40,
     ) -> None:
         self._preference_agent = preference_agent
         self._discovery_agent = discovery_agent
