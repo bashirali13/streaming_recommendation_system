@@ -246,14 +246,19 @@ class RealTmdbClient:
         return resolved or [_IMPOSSIBLE_PROVIDER_ID]
 
     async def _search_keyword_ids(self, text: str) -> list[int]:
-        """TMDB keyword ids matching a free-text search, cached per exact
-        query string for this client's lifetime (T087) -- avoids
-        re-searching the same descriptor across the movie/tv dual query
-        or a retry that doesn't relax tone.
+        """TMDB keyword ids matching a free-text search, best match first,
+        cached per exact query string for this client's lifetime (T087).
+        A keyword whose name is exactly the search text comes before the
+        rest (T117): TMDB ranks "b-horror" (1 TV show) above "horror"
+        (500), so taking the first hit built requests that matched almost
+        nothing.
         """
         if text not in self._keyword_id_cache:
             payload = await self._get_json("/search/keyword", {"query": text})
-            self._keyword_id_cache[text] = [entry["id"] for entry in payload.get("results", [])]
+            results = payload.get("results", [])
+            exact = [e for e in results if e["name"].lower() == text.lower()]
+            ordered = exact + [e for e in results if e not in exact]
+            self._keyword_id_cache[text] = [entry["id"] for entry in ordered]
         return self._keyword_id_cache[text]
 
     async def _resolve_keyword_ids(self, phrases: list[str]) -> list[int]:

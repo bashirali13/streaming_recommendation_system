@@ -912,3 +912,45 @@ async def test_movies_never_use_genre_keyword_stand_ins():
 
     assert calls[0]["with_genres"] == "10749"
     assert "with_keywords" not in calls[0]
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_an_exact_keyword_name_beats_the_first_search_hit():
+    """T117: searching "horror" returns "b-horror" (54 movies, 1 TV show)
+    before "horror" itself (2,081 movies, 500 TV shows), so taking the first
+    hit built a request that matched almost nothing."""
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            results = [{"id": 342626, "name": "b-horror"}, {"id": 315058, "name": "horror"}]
+            return httpx.Response(200, json={"results": results})
+        calls.append(dict(request.url.params))
+        many = [{"id": i} for i in range(12)]
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": many})
+
+    client = _client_with_handler(handler)
+
+    await _discover(client, ["horror"])
+
+    assert calls[0]["with_keywords"] == "315058"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_without_an_exact_name_the_first_search_hit_is_still_used():
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/search/keyword" in str(request.url):
+            return httpx.Response(200, json={"results": [{"id": 7, "name": "heist films"}]})
+        calls.append(dict(request.url.params))
+        many = [{"id": i} for i in range(12)]
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": many})
+
+    client = _client_with_handler(handler)
+
+    await _discover(client, ["heist"])
+
+    assert calls[0]["with_keywords"] == "7"

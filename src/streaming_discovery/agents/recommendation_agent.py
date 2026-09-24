@@ -3,18 +3,21 @@ into the final recommendation set.
 
 See specs/001-streaming-discovery-assistant/contracts/recommendation-agent.md.
 
-Per constitution Principle II, only the *wording* of each rationale comes
-from a language model; every decision that matters -- hard filtering,
+The language model does two things here: it writes the wording of each
+rationale, and (T116) it scores how well the best-ranked titles fit a
+requested mood in one batched call -- a ranking signal only, which can
+reorder candidates but never remove one. Everything else -- hard filtering,
 soft-fit scoring, role assignment, near-duplicate exclusion, and whether
 evidence for a subjective trait is weak enough to flag -- is deterministic
-code, unit-testable without a model call (NFR-001).
+code, unit-testable without a model call (NFR-001), and a failed mood call
+just means no mood bonus.
 """
 
 from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from streaming_discovery.contracts.candidate_media import CandidateMedia
 from streaming_discovery.contracts.candidate_pool import CandidatePool
@@ -28,7 +31,7 @@ from streaming_discovery.contracts.recommendation_package import (
     Recommendation,
     RecommendationPackage,
 )
-from streaming_discovery.llm.provider import ModelProvider, generate_with_retry
+from streaming_discovery.llm.provider import ModelCallError, ModelProvider, generate_with_retry
 from streaming_discovery.tmdb.normalize import TV_GENRE_ALIASES, TV_GENRE_KEYWORDS
 
 RATIONALE_SYSTEM_PROMPT = """\
@@ -72,6 +75,43 @@ def _normalize_title(title: str) -> str:
 
 def _for_title_matches(claimed: str, actual: str) -> bool:
     return _normalize_title(claimed) == _normalize_title(actual)
+
+
+MOOD_SYSTEM_PROMPT = """\
+You judge how well movies and shows fit a requested mood or feel, using only
+the details given for each title (genres, keywords, overview). Score every
+title: 0 = the details contradict the mood, 1 = no evidence either way,
+2 = fits, 3 = fits strongly. Return one score for every id, exactly once.
+Never use what you happen to know about a title beyond the details given.
+"""
+
+_MAX_MOOD_CANDIDATES = 24
+_NEUTRAL_MOOD_FIT = 1
+_MOOD_POINTS_PER_FIT = 1.5
+
+
+class _MoodScore(BaseModel):
+    tmdb_id: int
+    fit: int = Field(ge=0, le=3)
+
+
+class _MoodScores(BaseModel):
+    scores: list[_MoodScore]
+
+
+def _mood_words(profile: PreferenceProfile) -> list[str]:
+    return [*profile.tone_descriptors, *profile.setting_descriptors]
+
+
+def build_mood_prompt(profile: PreferenceProfile, candidates: list[CandidateMedia]) -> str:
+    """Pure, so tests can compute the key `FakeModelProvider` answers to."""
+    lines = [f"Requested mood/feel: {', '.join(_mood_words(profile))}", "", "Titles:"]
+    for c in candidates:
+        lines.append(
+            f"[{c.tmdb_id}] {c.title} ({c.release_year}) | genres: {', '.join(c.genres)} "
+            f"| keywords: {', '.join(c.thematic_keywords[:8])} | overview: {c.overview[:220]}"
+        )
+    return "\n".join(lines)
 
 
 def build_rationale_prompt(
@@ -273,24 +313,25 @@ def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
 
 
 def _rank_candidates(
-    profile: PreferenceProfile, candidates: list[CandidateMedia]
+    profile: PreferenceProfile,
+    candidates: list[CandidateMedia],
+    mood_scores: dict[int, int] | None = None,
 ) -> list[CandidateMedia]:
-    """T103: sort by full theme completeness as a tier first,
-    `_soft_score` as the tiebreaker within a tier second. T102's flat
-    additive bonus alone wasn't robust: live-verifying against the real
-    "road trip and found family" request found a genuinely full-matching
-    but obscure candidate (TMDB `vote_average` 0.0) still losing to
-    popular partial matches (`vote_average` ~8.5-8.7) -- a gap far
-    larger than any fixed bonus can be safely tuned to always beat
-    without eventually overcorrecting the opposite way for a smaller,
-    more ordinary gap. Tiering guarantees a full match is never beaten
-    by popularity alone, which is what actually delivers "the whole
-    catalog is a candidate, not just what's already popular" rather than
-    just narrowing the odds of it.
+    """T103: sort by full theme completeness as a tier first, then by
+    `_soft_score` -- a rating no fixed bonus can be tuned to always beat,
+    so a genuine full match is never beaten by popularity alone. T116: within
+    a tier, `mood_scores` (how well a title fits the requested mood, 0-3)
+    add or subtract points around a neutral score of 1, so a title with no
+    score is unaffected.
     """
+
+    def score(c: CandidateMedia) -> float:
+        fit = (mood_scores or {}).get(c.tmdb_id, _NEUTRAL_MOOD_FIT)
+        return _soft_score(profile, c) + _MOOD_POINTS_PER_FIT * (fit - _NEUTRAL_MOOD_FIT)
+
     return sorted(
         candidates,
-        key=lambda c: (_has_full_theme_match(profile, c), _soft_score(profile, c)),
+        key=lambda c: (_has_full_theme_match(profile, c), score(c)),
         reverse=True,
     )
 
@@ -373,6 +414,9 @@ class RecommendationAgent:
         qualifying = _hard_filter(profile, pool.candidates, pool.relaxed_constraint)
         qualifying = [c for c in qualifying if _meets_relevance_floor(profile, c)]
         ranked = _rank_candidates(profile, qualifying)
+        mood_scores = await self._mood_scores(profile, ranked)
+        if mood_scores:
+            ranked = _rank_candidates(profile, qualifying, mood_scores)
         selected = _deduplicate(ranked)[:3]
 
         if not selected:
@@ -383,7 +427,10 @@ class RecommendationAgent:
 
         picks: dict[RecommendationRole, Recommendation] = {}
         for role, candidate in zip(_ROLES_IN_PRIORITY_ORDER, selected, strict=False):
-            weak_evidence = _has_weak_tone_evidence(profile, candidate)
+            weak_evidence = (
+                _has_weak_tone_evidence(profile, candidate)
+                and mood_scores.get(candidate.tmdb_id, _NEUTRAL_MOOD_FIT) <= _NEUTRAL_MOOD_FIT
+            )
             rationale = await self._generate_rationale(
                 profile, candidate, weak_evidence=weak_evidence
             )
@@ -401,6 +448,29 @@ class RecommendationAgent:
             applied_constraints=profile,
             relaxed_constraint=pool.relaxed_constraint,
         )
+
+    async def _mood_scores(
+        self, profile: PreferenceProfile, ranked: list[CandidateMedia]
+    ) -> dict[int, int]:
+        """One batched call scoring how well the best-ranked candidates fit
+        the requested mood (T116). Skipped when there is no mood or nothing
+        to choose between; a failed call just means no mood bonus.
+        """
+        if not _mood_words(profile) or len(ranked) <= 3:
+            return {}
+        judged = ranked[:_MAX_MOOD_CANDIDATES]
+        try:
+            result = await generate_with_retry(
+                self._provider,
+                system_prompt=MOOD_SYSTEM_PROMPT,
+                user_prompt=build_mood_prompt(profile, judged),
+                output_type=_MoodScores,
+                max_additional_attempts=self._max_additional_attempts,
+            )
+        except ModelCallError:
+            return {}
+        known = {c.tmdb_id for c in judged}
+        return {s.tmdb_id: s.fit for s in result.scores if s.tmdb_id in known}
 
     async def _generate_rationale(
         self, profile: PreferenceProfile, candidate: CandidateMedia, *, weak_evidence: bool

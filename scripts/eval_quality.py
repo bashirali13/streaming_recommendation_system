@@ -26,7 +26,11 @@ from datetime import date
 
 from pydantic import BaseModel
 
-from streaming_discovery.agents.recommendation_agent import RecommendationAgent, _RationaleOutput
+from streaming_discovery.agents.recommendation_agent import (
+    RecommendationAgent,
+    _MoodScores,
+    _RationaleOutput,
+)
 from streaming_discovery.cli.output import _RealModelProvider, build_orchestrator
 from streaming_discovery.config import Settings
 
@@ -146,7 +150,7 @@ GOLD: list[dict] = [
     },
     {"p": "A romance TV series", "media": "tv", "genres": ["Romance"]},
     {"p": "Sci-fi TV show", "media": "tv", "genres": ["Science Fiction"]},
-    {"p": "Anime series", "media": "tv", "genres": ["Animation"]},
+    {"p": "Anime series", "media": "tv", "genres": ["Animation"], "languages": ["japanese"]},
     {"p": "A comedy TV series on Hulu", "media": "tv", "providers": ["hulu"], "genres": ["Comedy"]},
     {
         "p": "Documentary series on Netflix",
@@ -271,9 +275,20 @@ async def _mood_fits(judge, mood: str, c) -> bool:
 
 
 class _StubRationale:
-    """Stands in for the rationale model so the check is fast and free."""
+    """Stands in for the rationale model so the check is fast and free. The
+    mood judge, which decides the ranking, is the real model."""
+
+    def __init__(self) -> None:
+        settings = Settings()
+        self._real = _RealModelProvider(
+            model_name=settings.model_name, api_key=settings.openrouter_api_key, temperature=0.0
+        )
 
     async def generate(self, *, system_prompt: str, user_prompt: str, output_type):
+        if output_type is _MoodScores:
+            return await self._real.generate(
+                system_prompt=system_prompt, user_prompt=user_prompt, output_type=output_type
+            )
         title = re.search(r"^Title: (.*)$", user_prompt, re.M).group(1)
         return _RationaleOutput(for_title=title, text="(eval stub)", confidence_note=None)
 

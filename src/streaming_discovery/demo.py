@@ -7,7 +7,11 @@ end-to-end with zero live TMDB/model credentials. Selected via
 
 from __future__ import annotations
 
-from streaming_discovery.agents.recommendation_agent import _RationaleOutput, build_rationale_prompt
+from streaming_discovery.agents.recommendation_agent import (
+    _MoodScores,
+    _RationaleOutput,
+    build_rationale_prompt,
+)
 from streaming_discovery.contracts.enums import MediaType
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.llm.fake_provider import FakeModelProvider
@@ -75,7 +79,7 @@ def build_demo_preference_provider() -> FakeModelProvider:
 
 
 def build_demo_recommendation_provider() -> FakeModelProvider:
-    provider = FakeModelProvider()
+    provider = FakeModelProvider(defaults_by_type={_MoodScores: _MoodScores(scores=[])})
     for movie in _MOVIES:
         prompt = build_rationale_prompt(
             _PROFILE, title=movie["title"], overview=movie["overview"], weak_evidence=False

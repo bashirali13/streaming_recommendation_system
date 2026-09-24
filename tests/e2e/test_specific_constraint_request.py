@@ -9,7 +9,7 @@ import pytest
 from streaming_discovery.agents.discovery_agent import DiscoveryAgent
 from streaming_discovery.agents.orchestrator import Orchestrator
 from streaming_discovery.agents.preference_agent import PreferenceAgent
-from streaming_discovery.agents.recommendation_agent import RecommendationAgent
+from streaming_discovery.agents.recommendation_agent import RecommendationAgent, _MoodScores
 from streaming_discovery.cli.output import render_package
 from streaming_discovery.contracts.enums import MediaType
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
@@ -81,7 +81,10 @@ async def _silent_confirm(profile):
 @pytest.mark.asyncio
 async def test_specific_constraint_request_returns_three_distinct_non_excluded_picks():
     preference_provider = FakeModelProvider(responses={REQUEST: _EXPECTED_PROFILE})
-    recommendation_provider = FakeModelProvider()  # rationale text: default canned response below
+    # rationale text: canned responses below; the mood judge has nothing to add here
+    recommendation_provider = FakeModelProvider(
+        defaults_by_type={_MoodScores: _MoodScores(scores=[])}
+    )
     # Rationale prompts are keyed per-candidate; configure a response per finalist.
     from streaming_discovery.agents.recommendation_agent import (
         _RationaleOutput,

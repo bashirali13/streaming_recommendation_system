@@ -40,9 +40,11 @@ Rules:
   Thriller, TV Movie, War, War & Politics, Western. "Only use one of
   these exact names" means normalize a close synonym to the matching
   official name, not skip genres entirely when the user's own wording
-  doesn't match verbatim -- e.g. "cartoon", "cartoon animation",
-  "animated", and "anime" all mean the genre "Animation" and MUST be
-  normalized to it; "rom-com" means "Romance" and "Comedy" (both);
+  doesn't match verbatim -- e.g. "cartoon", "cartoon animation", and
+  "animated" mean the genre "Animation" and MUST be normalized to it;
+  "anime" means the genre "Animation" AND languages ["Japanese"] (it is
+  Japanese animation, not any cartoon); "rom-com" means "Romance" and
+  "Comedy" (both);
   "sci-fi" means "Science Fiction". Only drop a genre-sounding word
   entirely if it truly has no reasonable official-list equivalent.
 - CRITICAL: whatever the user says the content should be ABOUT --
