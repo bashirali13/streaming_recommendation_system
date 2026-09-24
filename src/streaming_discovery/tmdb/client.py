@@ -397,6 +397,7 @@ class RealTmdbClient:
         if provider_names:
             provider_ids = await self._resolve_provider_ids(provider_names, media_type, region)
             params["with_watch_providers"] = "|".join(str(pid) for pid in provider_ids)
+            params["with_watch_monetization_types"] = "flatrate"
         if included_genres:
             genre_ids = genre_ids_for_names(included_genres, media_type)
             if genre_ids:

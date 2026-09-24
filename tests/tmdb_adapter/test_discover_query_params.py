@@ -889,3 +889,70 @@ async def test_discover_caches_the_language_list_across_calls():
         )
 
     assert fetch_count == 1
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_restricts_provider_matches_to_flatrate_offers():
+    """T109: `with_watch_providers` alone matches ANY offer type (rent,
+    buy, free, ads). Everything downstream -- FR-019's display, the
+    "included with a subscription" meaning of naming a service --
+    is flatrate-only, so a title only rentable on a named service must not
+    pass the discover-time filter and then show up with no "Available on"
+    line at all.
+    """
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/watch/providers/" in str(request.url):
+            return httpx.Response(200, json=_PROVIDERS_RESPONSE)
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=["Netflix"],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert captured_params["with_watch_monetization_types"] == "flatrate"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_discover_sends_no_monetization_filter_when_no_provider_was_named():
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_params.update(dict(request.url.params))
+        return _empty_discover_response(request)
+
+    client = _client_with_handler(handler)
+
+    await client.discover(
+        media_type=MediaType.MOVIE,
+        region="US",
+        provider_names=[],
+        included_genres=[],
+        excluded_genres=[],
+        excluded_keywords=[],
+        vibe_keywords=[],
+        languages=[],
+        year_min=None,
+        year_max=None,
+        runtime_max_minutes=None,
+        result_limit=20,
+    )
+
+    assert "with_watch_monetization_types" not in captured_params
