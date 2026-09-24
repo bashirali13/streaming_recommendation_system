@@ -1,29 +1,26 @@
 """Unit test: the relaxation-priority helper picks the first eligible
-constraint in the fixed order (tone -> runtime -> year_range) present on
-the profile, and never returns excluded_genres, media_type, or any
+constraint in the fixed order (runtime -> year_range) present on the
+profile, and never returns excluded_genres, media_type, genres, or any
 hard_override_fields entry as relaxable (FR-011, FR-010).
+
+Mood/tone words are not a relaxable constraint: they are never sent to TMDB
+as filters in the first place (T111), so there is nothing to relax.
 """
+
+import pytest
 
 from streaming_discovery.agents.orchestrator import Orchestrator, select_relaxation_constraint
 from streaming_discovery.contracts.enums import MediaType, RelaxableConstraint
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 
 
-def test_tone_is_picked_first_when_present():
-    profile = PreferenceProfile(
-        genres=["Comedy"], tone_descriptors=["dark"], runtime_max_minutes=100, year_min=2010
-    )
-
-    assert select_relaxation_constraint(profile) is RelaxableConstraint.TONE
-
-
-def test_runtime_is_picked_when_tone_absent():
+def test_runtime_is_picked_first_when_present():
     profile = PreferenceProfile(genres=["Comedy"], runtime_max_minutes=100, year_min=2010)
 
     assert select_relaxation_constraint(profile) is RelaxableConstraint.RUNTIME
 
 
-def test_year_range_is_picked_when_tone_and_runtime_absent():
+def test_year_range_is_picked_when_runtime_absent():
     profile = PreferenceProfile(genres=["Comedy"], year_min=2010)
 
     assert select_relaxation_constraint(profile) is RelaxableConstraint.YEAR_RANGE
@@ -31,6 +28,14 @@ def test_year_range_is_picked_when_tone_and_runtime_absent():
 
 def test_none_eligible_returns_none():
     profile = PreferenceProfile(genres=["Comedy"])
+
+    assert select_relaxation_constraint(profile) is None
+
+
+def test_mood_words_alone_are_never_relaxable():
+    """A request with only genre + mood has nothing legitimate to relax:
+    dropping the genre would return unrelated titles (T111)."""
+    profile = PreferenceProfile(genres=["Romance"], tone_descriptors=["sweet", "passionate"])
 
     assert select_relaxation_constraint(profile) is None
 
@@ -62,15 +67,10 @@ def test_excluded_genres_and_media_type_are_never_returned_as_relaxable():
         media_type=MediaType.MOVIE, excluded_genres=["Horror"], genres=["Comedy"]
     )
 
-    result = select_relaxation_constraint(profile)
-
-    # There is no soft constraint stated here at all, so the only
-    # correct outcome is None -- specifically never
-    # RelaxableConstraint values that don't exist for media_type/
-    # excluded_genres, since RelaxableConstraint's own closed enum
-    # (tone/runtime/year_range) makes returning either structurally
-    # impossible, not just a convention.
-    assert result is None
+    # No soft constraint is stated, so the only correct outcome is None;
+    # RelaxableConstraint's closed enum (runtime/year_range) makes returning
+    # media_type or excluded_genres structurally impossible.
+    assert select_relaxation_constraint(profile) is None
 
 
 def _orchestrator() -> Orchestrator:
@@ -83,53 +83,36 @@ def _orchestrator() -> Orchestrator:
     )
 
 
-def test_relaxing_tone_drops_included_genres_from_the_retry_query():
-    """Tone/setting/theme descriptors never reach DiscoveryQuery, so
-    relaxing TONE has to act on the closest DiscoveryQuery-visible proxy
-    for "vibe precision": the genres the Preference Agent inferred.
-    Without this, relaxing tone would be a no-op retry that re-runs the
-    identical query and gets the identical zero result.
-    """
-    profile = PreferenceProfile(
-        media_type=MediaType.MOVIE, genres=["Thriller"], tone_descriptors=["dark", "moody"]
-    )
-    orchestrator = _orchestrator()
-
-    [initial_query] = orchestrator.build_discovery_queries(profile, retry_number=0)
-    [retried_query] = orchestrator.build_discovery_queries(
-        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
-    )
-
-    assert initial_query.included_genres == ["Thriller"]
-    assert retried_query.included_genres == []
-
-
-def test_relaxing_runtime_or_year_leaves_included_genres_untouched():
-    profile = PreferenceProfile(
-        media_type=MediaType.MOVIE, genres=["Thriller"], runtime_max_minutes=100
-    )
-    orchestrator = _orchestrator()
-
-    [retried_query] = orchestrator.build_discovery_queries(
-        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
-    )
-
-    assert retried_query.included_genres == ["Thriller"]
-
-
-def test_vibe_keywords_are_built_from_tone_setting_and_theme_descriptors():
-    """T101 (reversing T089, for a materially different, now-safe
-    reason): tone_descriptors are folded back into vibe_keywords,
-    since T100's AND-first/OR-fallback resolution means tone can now
-    only narrow a search anchored by a real theme/setting, never
-    substitute for one via an ungated OR the way it could before --
-    and T092's relevance floor still independently requires a genuine
-    theme_descriptors match to be selectable, regardless of how a
-    candidate entered the pool.
-    """
+@pytest.mark.parametrize("relaxed", [RelaxableConstraint.RUNTIME, RelaxableConstraint.YEAR_RANGE])
+def test_no_relaxation_ever_drops_the_genre(relaxed):
+    """A stated genre is a fact about what the user wants. Relaxing a
+    constraint to find matches must never widen the search to other genres
+    (a romance request that fell back to "any popular title" returned
+    Spider-Man, T111)."""
     profile = PreferenceProfile(
         media_type=MediaType.MOVIE,
-        tone_descriptors=["quirky humor"],
+        genres=["Romance"],
+        runtime_max_minutes=100,
+        year_min=2010,
+    )
+    orchestrator = _orchestrator()
+
+    [retried_query] = orchestrator.build_discovery_queries(
+        profile, retry_number=1, relaxed_constraint=relaxed
+    )
+
+    assert retried_query.included_genres == ["Romance"]
+
+
+def test_vibe_keywords_are_built_from_setting_and_theme_only():
+    """Concrete subject matter (a theme like "heist", a setting like
+    "winter") can be searched on TMDB's keyword catalog. Mood/tone words
+    never are (T111): TMDB tags "sweet" on 27 movies and "passionate" on 7
+    in its whole catalog, so requiring them wiped out valid answers. Mood is
+    used for ranking instead."""
+    profile = PreferenceProfile(
+        media_type=MediaType.MOVIE,
+        tone_descriptors=["quirky humor", "sweet"],
         setting_descriptors=["European architecture"],
         theme_descriptors=["fairy tale"],
     )
@@ -137,25 +120,16 @@ def test_vibe_keywords_are_built_from_tone_setting_and_theme_descriptors():
 
     [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
 
-    assert query.vibe_keywords == ["quirky humor", "European architecture", "fairy tale"]
+    assert query.vibe_keywords == ["European architecture", "fairy tale"]
 
 
-def test_relaxing_tone_also_drops_vibe_keywords_from_the_retry_query():
-    profile = PreferenceProfile(
-        media_type=MediaType.MOVIE,
-        genres=["Thriller"],
-        tone_descriptors=["dark", "moody"],
-        theme_descriptors=["heist"],
-    )
+def test_a_mood_only_request_sends_no_keywords_at_all():
+    profile = PreferenceProfile(media_type=MediaType.MOVIE, tone_descriptors=["cozy", "slow"])
     orchestrator = _orchestrator()
 
-    [initial_query] = orchestrator.build_discovery_queries(profile, retry_number=0)
-    [retried_query] = orchestrator.build_discovery_queries(
-        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
-    )
+    [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
 
-    assert initial_query.vibe_keywords == ["dark", "moody", "heist"]
-    assert retried_query.vibe_keywords == []
+    assert query.vibe_keywords == []
 
 
 def test_excluded_keywords_are_passed_through_and_never_relaxed():
@@ -163,19 +137,20 @@ def test_excluded_keywords_are_passed_through_and_never_relaxed():
         media_type=MediaType.MOVIE,
         theme_descriptors=["superhero"],
         excluded_keywords=["Marvel", "DC"],
+        runtime_max_minutes=100,
     )
     orchestrator = _orchestrator()
 
     [initial_query] = orchestrator.build_discovery_queries(profile, retry_number=0)
     [retried_query] = orchestrator.build_discovery_queries(
-        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.TONE
+        profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
     )
 
     assert initial_query.excluded_keywords == ["Marvel", "DC"]
     assert retried_query.excluded_keywords == ["Marvel", "DC"]
 
 
-def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
+def test_relaxing_runtime_leaves_vibe_keywords_untouched():
     profile = PreferenceProfile(
         media_type=MediaType.MOVIE,
         tone_descriptors=["cozy"],
@@ -188,19 +163,4 @@ def test_relaxing_runtime_or_year_leaves_vibe_keywords_untouched():
         profile, retry_number=1, relaxed_constraint=RelaxableConstraint.RUNTIME
     )
 
-    assert retried_query.vibe_keywords == ["cozy", "heist"]
-
-
-def test_vibe_keywords_carries_tone_alone_when_no_theme_or_setting_is_stated():
-    """A pure-tone-only request ("rainy Sunday afternoon") now actually
-    searches TMDB's keyword catalog instead of only ever seeing whatever
-    TMDB's default popularity sort returns -- with no theme/setting to
-    require, T100's fallback logic naturally uses OR across whatever
-    tone ids resolve.
-    """
-    profile = PreferenceProfile(media_type=MediaType.MOVIE, tone_descriptors=["cozy", "slow"])
-    orchestrator = _orchestrator()
-
-    [query] = orchestrator.build_discovery_queries(profile, retry_number=0)
-
-    assert query.vibe_keywords == ["cozy", "slow"]
+    assert retried_query.vibe_keywords == ["heist"]

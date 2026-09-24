@@ -21,12 +21,12 @@ class MediaType(StrEnum):
 
 class RelaxableConstraint(StrEnum):
     """The closed set of soft constraints FR-011 permits the Orchestrator
-    to relax, in this fixed priority order: tone, then runtime, then
-    year_range. No other value is ever legal here, which is what makes
-    "hard constraints are never relaxed" (FR-010) mechanically enforceable.
+    to relax, in this fixed priority order: runtime, then year_range. No
+    other value is ever legal here (not genre, not mood -- T111), which is
+    what makes "hard constraints are never relaxed" (FR-010) mechanically
+    enforceable.
     """
 
-    TONE = "tone"
     RUNTIME = "runtime"
     YEAR_RANGE = "year_range"
 

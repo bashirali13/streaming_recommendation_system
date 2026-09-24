@@ -44,6 +44,12 @@ _MAX_VIBE_KEYWORD_IDS = 10
 tone/setting/theme descriptors are unbounded user input; this keeps
 `with_keywords` from growing without bound."""
 
+_MIN_KEYWORD_POOL = 10
+"""If requiring keywords leaves fewer results than this, the keyword filter
+is treated as too narrow and widened (T111). TMDB's keyword tagging is
+sparse -- "sweet" is on 27 movies in its whole catalog -- so a keyword match
+is a bonus to find, never something that may wipe out the valid answers."""
+
 _VIBE_SEARCH_STOPWORDS = {"and", "the", "with", "that", "this", "from", "your"}
 """Skipped during the per-word fallback in `_resolve_vibe_keyword_ids`
 (T087) -- common connective words that would waste a keyword-search call
@@ -209,7 +215,6 @@ class RealTmdbClient:
         self._provider_table_cache: dict[tuple[MediaType, str], dict[str, int]] = {}
         self._keyword_id_cache: dict[str, list[int]] = {}
         self._language_table_cache: dict[str, str] | None = None
-        self._company_id_cache: dict[str, int | None] = {}
         self._person_id_cache: dict[str, int | None] = {}
 
     async def aclose(self) -> None:
@@ -282,33 +287,6 @@ class RealTmdbClient:
                 resolved.append(ids[0])
             if len(resolved) >= _MAX_VIBE_KEYWORD_IDS:
                 break
-        return resolved
-
-    async def _search_company_id(self, text: str) -> int | None:
-        """TMDB company ids matching a free-text search, cached per exact
-        query string for this client's lifetime (T106, mirroring
-        `_search_keyword_ids`). Takes TMDB's own relevance ranking as-is
-        (the first result, if any) -- confirmed live this is usually the
-        expected entity ("Marvel" -> "Marvel Studios", "DC" -> "DC"), but
-        not always ("Disney" ranks a regional office above the actual
-        studio). An imperfect or unresolved company match here is not a
-        lost exclusion: `without_keywords` and the detail-call
-        `production_companies` text-match check (T095) already
-        independently enforce the exclusion regardless of whether this
-        discover-time optimization resolves to the ideal entity.
-        """
-        if text not in self._company_id_cache:
-            payload = await self._get_json("/search/company", {"query": text})
-            results = payload.get("results", [])
-            self._company_id_cache[text] = results[0]["id"] if results else None
-        return self._company_id_cache[text]
-
-    async def _resolve_company_ids(self, phrases: list[str]) -> list[int]:
-        resolved: list[int] = []
-        for phrase in phrases:
-            company_id = await self._search_company_id(phrase)
-            if company_id is not None:
-                resolved.append(company_id)
         return resolved
 
     async def _search_person_id(self, text: str) -> int | None:
@@ -410,9 +388,6 @@ class RealTmdbClient:
             excluded_keyword_ids = await self._resolve_keyword_ids(excluded_keywords)
             if excluded_keyword_ids:
                 params["without_keywords"] = "|".join(str(kid) for kid in excluded_keyword_ids)
-            excluded_company_ids = await self._resolve_company_ids(excluded_keywords)
-            if excluded_company_ids:
-                params["without_companies"] = "|".join(str(cid) for cid in excluded_company_ids)
         if year_min is not None:
             params[f"{date_field}.gte"] = f"{year_min}-01-01"
         if year_max is not None:
@@ -441,30 +416,39 @@ class RealTmdbClient:
         *,
         result_limit: int,
     ) -> list[dict]:
-        """T100/T101: AND semantics first -- a candidate must match every
-        resolved `vibe_keywords` id (theme, setting, and tone together),
-        since a compound request ("road trip and found family") should
-        require all of what was named, not just one. Falls back to OR
-        (matching any) only if AND finds nothing at all, and only within
-        this one `discover()` call -- TMDB's `with_keywords` supports only
-        one separator per call, so this can't be a single mixed
-        expression, and it never consumes the Orchestrator's one
-        disclosed bounded retry (FR-011), since it isn't a constraint
-        relaxation, just a query-construction detail -- consistent with
-        an unresolved keyword already being dropped silently rather than
-        disclosed (data-model.md).
+        """Narrow first, widen when the narrowing leaves too few results
+        (T100, T111). Tries every resolved keyword required (AND), then any
+        of them (OR), and accepts the first attempt that leaves at least
+        `_MIN_KEYWORD_POOL` results. If none does, falls back to the
+        request without keywords -- keeping whatever narrow matches were
+        found at the front of the pool -- so a keyword can put the best
+        matches first but can never leave the user with a handful of
+        results, or none. TMDB's `with_keywords` supports only one
+        separator per call, so AND and OR are separate attempts. All of
+        this happens inside one `discover()` call and is a query-
+        construction detail, not a disclosed relaxation (FR-011).
         """
-        if len(keyword_ids) == 1:
-            params = {**base_params, "with_keywords": str(keyword_ids[0])}
-            return await self._paginate(endpoint, params, result_limit=result_limit)
+        enough = min(_MIN_KEYWORD_POOL, result_limit)
+        attempts = [",".join(str(k) for k in keyword_ids)] if len(keyword_ids) > 1 else []
+        attempts.append("|".join(str(k) for k in keyword_ids))
 
-        and_params = {**base_params, "with_keywords": ",".join(str(k) for k in keyword_ids)}
-        results = await self._paginate(endpoint, and_params, result_limit=result_limit)
-        if results:
-            return results
+        narrow: list[dict] = []
+        for value in attempts:
+            found = await self._paginate(
+                endpoint, {**base_params, "with_keywords": value}, result_limit=result_limit
+            )
+            if len(found) >= enough:
+                return found
+            narrow.extend(found)
 
-        or_params = {**base_params, "with_keywords": "|".join(str(k) for k in keyword_ids)}
-        return await self._paginate(endpoint, or_params, result_limit=result_limit)
+        wide = await self._paginate(endpoint, base_params, result_limit=result_limit)
+        seen: set[int] = set()
+        merged: list[dict] = []
+        for item in [*narrow, *wide]:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                merged.append(item)
+        return merged[:result_limit]
 
     async def search_title(self, *, media_type: MediaType, title: str) -> int | None:
         endpoint = "/search/movie" if media_type is MediaType.MOVIE else "/search/tv"

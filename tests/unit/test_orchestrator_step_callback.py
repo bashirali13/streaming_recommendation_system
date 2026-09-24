@@ -27,7 +27,9 @@ from streaming_discovery.llm.fake_provider import FakeModelProvider
 from streaming_discovery.tmdb.fake_client import FakeTmdbClient
 
 REQUEST = "A dark, gritty thriller."
-_PROFILE = PreferenceProfile(media_type=MediaType.MOVIE, tone_descriptors=["dark", "gritty"])
+_PROFILE = PreferenceProfile(
+    media_type=MediaType.MOVIE, genres=["Thriller"], runtime_max_minutes=100
+)
 _RAW_MOVIE = {
     "id": 1,
     "title": "Night Shift",
@@ -94,7 +96,7 @@ async def test_on_step_reports_the_retry_with_the_relaxed_constraint_named():
 
     assert steps[0] == STEP_INTERPRETING
     assert steps[1] == STEP_SEARCHING_TMDB
-    assert "tone" in steps[2].lower()
+    assert "runtime" in steps[2].lower()
     assert "relax" in steps[2].lower()
     assert steps[3] == STEP_CURATING_PICKS
 

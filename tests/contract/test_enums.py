@@ -24,13 +24,18 @@ class TestMediaType:
 @pytest.mark.contract
 class TestRelaxableConstraint:
     def test_valid_values(self):
-        assert RelaxableConstraint("tone") is RelaxableConstraint.TONE
         assert RelaxableConstraint("runtime") is RelaxableConstraint.RUNTIME
         assert RelaxableConstraint("year_range") is RelaxableConstraint.YEAR_RANGE
 
     def test_invalid_value_rejected(self):
         with pytest.raises(ValueError):
             RelaxableConstraint("genre")
+
+    def test_tone_is_not_relaxable(self):
+        """Mood words are never sent to TMDB as filters (T111), so there is
+        nothing to relax; genre is never relaxable either."""
+        with pytest.raises(ValueError):
+            RelaxableConstraint("tone")
 
 
 @pytest.mark.contract

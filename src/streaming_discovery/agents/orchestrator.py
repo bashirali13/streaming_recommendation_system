@@ -175,45 +175,28 @@ class Orchestrator:
         (contracts/discovery-agent.md) -- that's what keeps this agent
         out of intent *interpretation*.
 
-        `vibe_keywords` (T087, revised by T089 then T101) carries
-        `tone_descriptors`, `setting_descriptors`, and `theme_descriptors`
-        through as literal TMDB keyword-search terms -- not
-        interpretation, just another deterministic TMDB-server-side
-        filter (FR-029), resolved to real keyword ids inside
-        `RealTmdbClient.discover()`. T089 excluded tone here after a live
-        run where OR-ing a noisy tone-keyword match in let an otherwise
-        irrelevant candidate satisfy discovery on tone alone. T101 folds
-        it back in for a materially different, now-safe reason: T100
-        gave `RealTmdbClient.discover()` AND-first/OR-fallback resolution,
-        so tone can now only *narrow* a search anchored by a real
-        theme/setting, never substitute for one the way an ungated OR
-        could -- and even in the fallback-to-OR case, the Recommendation
-        Agent's relevance floor still independently requires a genuine
-        `theme_descriptors` match to be selectable whenever a theme was
-        stated, regardless of how a candidate entered the pool.
+        `vibe_keywords` carries `setting_descriptors` and
+        `theme_descriptors` -- concrete subject matter such as "heist" or
+        "winter" -- as literal TMDB keyword-search terms, resolved to real
+        keyword ids inside `RealTmdbClient.discover()`. `tone_descriptors`
+        (mood words like "sweet" or "cozy") are deliberately NOT sent
+        (T111): TMDB's keyword tagging is far too sparse for them (27
+        movies carry "sweet"), so requiring them wiped out valid answers.
+        Mood is used for ranking in the Recommendation Agent instead.
 
-        Relaxing `RelaxableConstraint.TONE` drops both `vibe_keywords`
-        and `included_genres` entirely for this attempt -- without this,
-        relaxing tone would be a no-op retry that re-runs an identical
-        query and gets an identical zero result. This does not touch
-        `excluded_genres`, which stays hard regardless of which
-        constraint is relaxed (FR-010).
+        Relaxation never touches `included_genres`: a stated genre is a
+        fact about what the user wants, and widening past it returns
+        unrelated titles. Only runtime and then year range can be relaxed
+        (FR-011), and `excluded_genres` stays hard regardless (FR-010).
         """
         year_min, year_max = profile.year_min, profile.year_max
         runtime_max = profile.runtime_max_minutes
         included_genres = profile.genres
-        vibe_keywords = [
-            *profile.tone_descriptors,
-            *profile.setting_descriptors,
-            *profile.theme_descriptors,
-        ]
+        vibe_keywords = [*profile.setting_descriptors, *profile.theme_descriptors]
         if relaxed_constraint is RelaxableConstraint.YEAR_RANGE:
             year_min = year_max = None
         if relaxed_constraint is RelaxableConstraint.RUNTIME:
             runtime_max = None
-        if relaxed_constraint is RelaxableConstraint.TONE:
-            included_genres = []
-            vibe_keywords = []
         return [
             DiscoveryQuery(
                 media_type=media_type,
@@ -354,24 +337,20 @@ class Orchestrator:
 
 
 _RELAXATION_PRIORITY_ORDER = (
-    RelaxableConstraint.TONE,
     RelaxableConstraint.RUNTIME,
     RelaxableConstraint.YEAR_RANGE,
 )
 
 
 def select_relaxation_constraint(profile: PreferenceProfile) -> RelaxableConstraint | None:
-    """The first constraint in FR-011's fixed priority order (tone ->
-    runtime -> year_range) that is both stated on the profile and not
+    """The first constraint in FR-011's fixed priority order (runtime ->
+    year_range) that is both stated on the profile and not
     marked non-negotiable via `hard_override_fields`. Returns `None` when
     nothing is eligible -- `excluded_genres`/`media_type`/any
     hard-overridden field are never legal return values here, since
     `RelaxableConstraint`'s own closed enum makes that structurally
     impossible, not just a convention (FR-010).
     """
-    tone_present = bool(
-        profile.tone_descriptors or profile.setting_descriptors or profile.theme_descriptors
-    )
     runtime_eligible = (
         profile.runtime_max_minutes is not None
         and "runtime_max_minutes" not in profile.hard_override_fields
@@ -382,7 +361,6 @@ def select_relaxation_constraint(profile: PreferenceProfile) -> RelaxableConstra
         and "year_max" not in profile.hard_override_fields
     )
     eligible = {
-        RelaxableConstraint.TONE: tone_present,
         RelaxableConstraint.RUNTIME: runtime_eligible,
         RelaxableConstraint.YEAR_RANGE: year_eligible,
     }

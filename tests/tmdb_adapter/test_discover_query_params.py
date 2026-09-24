@@ -387,8 +387,6 @@ async def test_discover_resolves_excluded_keywords_to_without_keywords():
     def handler(request: httpx.Request) -> httpx.Response:
         if "/search/keyword" in str(request.url):
             return _keyword_handler(request)
-        if "/search/company" in str(request.url):
-            return httpx.Response(200, json={"results": []})
         captured_params.update(dict(request.url.params))
         return _empty_discover_response(request)
 
@@ -414,140 +412,6 @@ async def test_discover_resolves_excluded_keywords_to_without_keywords():
     assert "with_keywords" not in captured_params
 
 
-_COMPANY_RESPONSES = {
-    "Marvel": {"results": [{"id": 420, "name": "Marvel Studios"}]},
-    "DC": {"results": [{"id": 429, "name": "DC"}]},
-    "Disney": {
-        "results": [
-            {"id": 99981, "name": "Disney Türkiye"},
-            {"id": 2, "name": "Walt Disney Pictures"},
-        ]
-    },
-}
-
-
-def _company_handler(request: httpx.Request) -> httpx.Response:
-    query = request.url.params.get("query", "")
-    return httpx.Response(200, json=_COMPANY_RESPONSES.get(query, {"results": []}))
-
-
-@pytest.mark.tmdb_adapter
-@pytest.mark.asyncio
-async def test_discover_resolves_excluded_keywords_to_without_companies_too():
-    """T106: without_companies is a discover-time layer on top of (not
-    instead of) without_keywords and the detail-call text-match check
-    (T095) -- it excludes a resolved company before a detail() call is
-    even spent on a doomed candidate.
-    """
-    captured_params: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/search/keyword" in str(request.url):
-            return _keyword_handler(request)
-        if "/search/company" in str(request.url):
-            return _company_handler(request)
-        captured_params.update(dict(request.url.params))
-        return _empty_discover_response(request)
-
-    client = _client_with_handler(handler)
-
-    await client.discover(
-        media_type=MediaType.MOVIE,
-        region="US",
-        provider_names=[],
-        included_genres=[],
-        excluded_genres=[],
-        excluded_keywords=["Marvel", "DC"],
-        vibe_keywords=[],
-        languages=[],
-        year_min=None,
-        year_max=None,
-        runtime_max_minutes=None,
-        result_limit=20,
-    )
-
-    ids = set(captured_params["without_companies"].split("|"))
-    assert ids == {"420", "429"}
-    # without_keywords still applies too -- an additional layer, not a replacement.
-    assert "without_keywords" in captured_params
-
-
-@pytest.mark.tmdb_adapter
-@pytest.mark.asyncio
-async def test_discover_takes_the_first_company_search_result_even_when_imprecise():
-    """Mirrors `_resolve_keyword_ids`'s existing "trust TMDB's own top
-    result" approach rather than inventing a bespoke disambiguation
-    scheme. Confirmed live this is usually the expected entity, but not
-    always -- searching "Disney" ranks a regional office ("Disney
-    Turkiye") above the actual studio ("Walt Disney Pictures"). Accepted
-    as a known, bounded-risk limitation of this one optimization layer:
-    worst case, it excludes an irrelevant company that matches no real
-    candidate (a silent no-op, not a wrong exclusion of an unrelated
-    title), while `without_keywords` and the detail-call
-    `production_companies` text-match check (T095) still independently
-    and correctly enforce the exclusion regardless.
-    """
-    captured_params: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/search/company" in str(request.url):
-            return _company_handler(request)
-        captured_params.update(dict(request.url.params))
-        return _empty_discover_response(request)
-
-    client = _client_with_handler(handler)
-
-    await client.discover(
-        media_type=MediaType.MOVIE,
-        region="US",
-        provider_names=[],
-        included_genres=[],
-        excluded_genres=[],
-        excluded_keywords=["Disney"],
-        vibe_keywords=[],
-        languages=[],
-        year_min=None,
-        year_max=None,
-        runtime_max_minutes=None,
-        result_limit=20,
-    )
-
-    assert captured_params["without_companies"] == "99981"
-
-
-@pytest.mark.tmdb_adapter
-@pytest.mark.asyncio
-async def test_discover_omits_without_companies_when_nothing_resolves():
-    captured_params: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/search/keyword" in str(request.url):
-            return httpx.Response(200, json={"results": []})
-        if "/search/company" in str(request.url):
-            return httpx.Response(200, json={"results": []})
-        captured_params.update(dict(request.url.params))
-        return _empty_discover_response(request)
-
-    client = _client_with_handler(handler)
-
-    await client.discover(
-        media_type=MediaType.MOVIE,
-        region="US",
-        provider_names=[],
-        included_genres=[],
-        excluded_genres=[],
-        excluded_keywords=["Some Obscure Franchise Nobody Tagged"],
-        vibe_keywords=[],
-        languages=[],
-        year_min=None,
-        year_max=None,
-        runtime_max_minutes=None,
-        result_limit=20,
-    )
-
-    assert "without_companies" not in captured_params
-
-
 @pytest.mark.tmdb_adapter
 @pytest.mark.asyncio
 async def test_discover_omits_without_keywords_when_nothing_resolves():
@@ -560,8 +424,6 @@ async def test_discover_omits_without_keywords_when_nothing_resolves():
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "/search/keyword" in str(request.url):
-            return httpx.Response(200, json={"results": []})
-        if "/search/company" in str(request.url):
             return httpx.Response(200, json={"results": []})
         captured_params.update(dict(request.url.params))
         return _empty_discover_response(request)
@@ -597,117 +459,110 @@ def _multi_keyword_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, json=_MULTI_KEYWORD_RESPONSES.get(query, {"results": []}))
 
 
-@pytest.mark.tmdb_adapter
-@pytest.mark.asyncio
-async def test_discover_tries_and_semantics_first_for_multiple_keyword_ids():
-    """T100: a compound request ("road trip and found family") should
-    require all of what was named, not just one -- with_keywords is
-    comma-joined (AND) on the first attempt.
+def _ladder_client(sizes: dict[str, int]):
+    """A client whose discover endpoint returns `sizes[mode]` distinct
+    results, where mode is "and" (comma keywords), "or" (a single id or
+    pipe keywords) or "none" (no keyword filter). Returns (client, calls).
     """
-    discover_calls: list[dict] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/search/keyword" in str(request.url):
-            return _multi_keyword_handler(request)
-        discover_calls.append(dict(request.url.params))
-        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": [{"id": 1}]})
-
-    client = _client_with_handler(handler)
-
-    await client.discover(
-        media_type=MediaType.MOVIE,
-        region="US",
-        provider_names=[],
-        included_genres=[],
-        excluded_genres=[],
-        excluded_keywords=[],
-        vibe_keywords=["road trip", "found family"],
-        languages=[],
-        year_min=None,
-        year_max=None,
-        runtime_max_minutes=None,
-        result_limit=20,
-    )
-
-    assert len(discover_calls) == 1  # AND succeeded, no fallback needed
-    ids = set(discover_calls[0]["with_keywords"].split(","))
-    assert ids == {"500", "600"}
-
-
-@pytest.mark.tmdb_adapter
-@pytest.mark.asyncio
-async def test_discover_falls_back_to_or_semantics_when_and_finds_nothing():
-    """T100: if requiring every named theme/setting finds literally
-    nothing, retry -- within this same discover() call, invisibly --
-    with OR semantics instead of leaving the user with zero results
-    when a partial match was available.
-    """
-    discover_calls: list[dict] = []
+    calls: list[dict] = []
+    base = {"and": 1000, "or": 2000, "none": 3000}
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "/search/keyword" in str(request.url):
             return _multi_keyword_handler(request)
         params = dict(request.url.params)
-        discover_calls.append(params)
-        if "," in params.get("with_keywords", ""):
-            return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": []})
-        return httpx.Response(
-            200, json={"page": 1, "total_pages": 1, "results": [{"id": 1, "title": "Found"}]}
-        )
+        calls.append(params)
+        keywords = params.get("with_keywords")
+        mode = "none" if keywords is None else ("and" if "," in keywords else "or")
+        results = [{"id": base[mode] + i, "title": f"{mode}-{i}"} for i in range(sizes[mode])]
+        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": results})
 
-    client = _client_with_handler(handler)
+    return _client_with_handler(handler), calls
 
-    results = await client.discover(
+
+async def _discover(client, vibe_keywords):
+    return await client.discover(
         media_type=MediaType.MOVIE,
         region="US",
         provider_names=[],
         included_genres=[],
         excluded_genres=[],
         excluded_keywords=[],
-        vibe_keywords=["road trip", "found family"],
+        vibe_keywords=vibe_keywords,
         languages=[],
         year_min=None,
         year_max=None,
         runtime_max_minutes=None,
         result_limit=20,
     )
-
-    assert len(discover_calls) == 2  # AND attempt, then the OR fallback
-    ids = set(discover_calls[1]["with_keywords"].split("|"))
-    assert ids == {"500", "600"}
-    assert results == [{"id": 1, "title": "Found"}]
 
 
 @pytest.mark.tmdb_adapter
 @pytest.mark.asyncio
-async def test_discover_uses_a_single_keyword_id_directly_with_no_and_or_fallback():
-    discover_calls: list[dict] = []
+async def test_keywords_are_required_together_when_that_leaves_enough_results():
+    """T100: a compound request ("road trip and found family") should
+    require all of what was named, as long as that still leaves a usable
+    pool (T111)."""
+    client, calls = _ladder_client({"and": 12, "or": 12, "none": 12})
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/search/keyword" in str(request.url):
-            return _multi_keyword_handler(request)
-        discover_calls.append(dict(request.url.params))
-        return httpx.Response(200, json={"page": 1, "total_pages": 1, "results": []})
+    results = await _discover(client, ["road trip", "found family"])
 
-    client = _client_with_handler(handler)
+    assert len(calls) == 1
+    assert set(calls[0]["with_keywords"].split(",")) == {"500", "600"}
+    assert len(results) == 12
 
-    await client.discover(
-        media_type=MediaType.MOVIE,
-        region="US",
-        provider_names=[],
-        included_genres=[],
-        excluded_genres=[],
-        excluded_keywords=[],
-        vibe_keywords=["road trip"],
-        languages=[],
-        year_min=None,
-        year_max=None,
-        runtime_max_minutes=None,
-        result_limit=20,
-    )
 
-    assert len(discover_calls) == 1
-    assert discover_calls[0]["with_keywords"] == "500"
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_widens_to_any_keyword_when_requiring_all_leaves_too_few():
+    client, calls = _ladder_client({"and": 3, "or": 12, "none": 12})
+
+    results = await _discover(client, ["road trip", "found family"])
+
+    assert len(calls) == 2
+    assert set(calls[1]["with_keywords"].split("|")) == {"500", "600"}
+    assert all(r["title"].startswith("or-") for r in results)
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_drops_the_keyword_filter_when_even_any_keyword_leaves_too_few():
+    """T111: TMDB's keyword tagging is sparse, so a keyword may put its
+    best matches first but must never leave the user with a handful of
+    results. The narrow matches stay at the front of the wide pool."""
+    client, calls = _ladder_client({"and": 0, "or": 2, "none": 20})
+
+    results = await _discover(client, ["road trip", "found family"])
+
+    assert len(calls) == 3
+    assert "with_keywords" not in calls[2]
+    assert [r["title"] for r in results[:2]] == ["or-0", "or-1"]
+    assert len(results) == 20
+    assert len({r["id"] for r in results}) == 20
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_a_single_keyword_that_leaves_too_few_is_dropped_too():
+    client, calls = _ladder_client({"and": 0, "or": 1, "none": 15})
+
+    results = await _discover(client, ["road trip"])
+
+    assert len(calls) == 2
+    assert calls[0]["with_keywords"] == "500"
+    assert "with_keywords" not in calls[1]
+    assert results[0]["title"] == "or-0"
+
+
+@pytest.mark.tmdb_adapter
+@pytest.mark.asyncio
+async def test_a_single_keyword_with_enough_results_is_used_directly():
+    client, calls = _ladder_client({"and": 0, "or": 12, "none": 12})
+
+    await _discover(client, ["road trip"])
+
+    assert len(calls) == 1
+    assert calls[0]["with_keywords"] == "500"
 
 
 _LANGUAGES_RESPONSE = [

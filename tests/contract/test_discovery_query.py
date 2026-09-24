@@ -57,7 +57,7 @@ class TestDiscoveryQueryInvalid:
                 media_type=MediaType.MOVIE,
                 region="US",
                 retry_number=0,
-                relaxed_constraint=RelaxableConstraint.TONE,
+                relaxed_constraint=RelaxableConstraint.RUNTIME,
             )
 
     def test_retry_attempt_without_relaxation_rejected(self):
