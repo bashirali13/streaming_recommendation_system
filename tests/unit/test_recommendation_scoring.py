@@ -14,7 +14,7 @@ from streaming_discovery.agents.recommendation_agent import (
     _soft_score,
 )
 from streaming_discovery.contracts.candidate_media import CandidateMedia
-from streaming_discovery.contracts.enums import MediaType
+from streaming_discovery.contracts.enums import MediaType, RelaxableConstraint
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 
 
@@ -39,11 +39,122 @@ class TestHardFilter:
 
     def test_excludes_excluded_genre(self):
         profile = PreferenceProfile(genres=["Thriller"], excluded_genres=["Horror"])
-        candidates = [_candidate(genres=["Horror"]), _candidate(tmdb_id=2, genres=["Drama"])]
+        candidates = [_candidate(genres=["Horror"]), _candidate(tmdb_id=2, genres=["Thriller"])]
 
         result = _hard_filter(profile, candidates)
 
         assert [c.tmdb_id for c in result] == [2]
+
+
+class TestHardFilterRechecksStatedFacts:
+    """T112: every pick is rechecked against the facts the user stated,
+    whichever path produced it -- TMDB's own filters can disagree with a
+    title's details (a "under 2 hours" pick that is 141 minutes), and the
+    similar-titles path applies no filters at all. Only a constraint that
+    was explicitly relaxed is skipped.
+    """
+
+    def test_excludes_a_candidate_missing_a_requested_genre(self):
+        profile = PreferenceProfile(genres=["Romance"])
+        candidates = [
+            _candidate(tmdb_id=1, genres=["Romance", "Drama"]),
+            _candidate(tmdb_id=2, genres=["Animation", "Family"]),
+        ]
+
+        assert [c.tmdb_id for c in _hard_filter(profile, candidates)] == [1]
+
+    def test_every_requested_genre_is_required(self):
+        profile = PreferenceProfile(genres=["Romance", "Comedy"])
+        candidates = [
+            _candidate(tmdb_id=1, genres=["Romance", "Comedy"]),
+            _candidate(tmdb_id=2, genres=["Romance"]),
+        ]
+
+        assert [c.tmdb_id for c in _hard_filter(profile, candidates)] == [1]
+
+    def test_a_tv_show_with_the_combined_tv_genre_satisfies_science_fiction(self):
+        profile = PreferenceProfile(genres=["Science Fiction"])
+        show = _candidate(media_type=MediaType.TV, genres=["Sci-Fi & Fantasy", "Drama"])
+
+        assert _hard_filter(profile, [show]) == [show]
+
+    def test_a_tv_show_satisfies_a_genre_tv_lacks_through_its_keywords(self):
+        """TMDB's TV genres have no Romance, so it can only be read from
+        the show's keywords."""
+        profile = PreferenceProfile(genres=["Romance"])
+        tagged = _candidate(
+            tmdb_id=1, media_type=MediaType.TV, genres=["Drama"], thematic_keywords=["romance"]
+        )
+        untagged = _candidate(
+            tmdb_id=2, media_type=MediaType.TV, genres=["Animation"], thematic_keywords=["ninja"]
+        )
+
+        assert [c.tmdb_id for c in _hard_filter(profile, [tagged, untagged])] == [1]
+
+    def test_excludes_a_release_year_outside_the_range(self):
+        profile = PreferenceProfile(genres=["Drama"], year_min=1990, year_max=1999)
+        candidates = [
+            _candidate(tmdb_id=1, genres=["Drama"], release_year=1995),
+            _candidate(tmdb_id=2, genres=["Drama"], release_year=1985),
+            _candidate(tmdb_id=3, genres=["Drama"], release_year=2005),
+        ]
+
+        assert [c.tmdb_id for c in _hard_filter(profile, candidates)] == [1]
+
+    def test_a_relaxed_year_range_is_not_enforced(self):
+        profile = PreferenceProfile(genres=["Drama"], year_min=1990)
+        old = _candidate(genres=["Drama"], release_year=1985)
+
+        result = _hard_filter(profile, [old], relaxed=RelaxableConstraint.YEAR_RANGE)
+
+        assert result == [old]
+
+    def test_unknown_release_year_is_kept(self):
+        profile = PreferenceProfile(genres=["Drama"], year_min=1990)
+        candidate = _candidate(genres=["Drama"], release_year=None)
+
+        assert _hard_filter(profile, [candidate]) == [candidate]
+
+    def test_excludes_a_pick_not_on_a_requested_service(self):
+        profile = PreferenceProfile(providers=["Netflix", "Hulu"])
+        candidates = [
+            _candidate(tmdb_id=1, provider_names=["Hulu"]),
+            _candidate(tmdb_id=2, provider_names=["Amazon Prime Video"]),
+            _candidate(tmdb_id=3, provider_names=[]),
+        ]
+
+        assert [c.tmdb_id for c in _hard_filter(profile, candidates)] == [1]
+
+    def test_provider_names_match_despite_punctuation_and_variants(self):
+        profile = PreferenceProfile(providers=["Disney+"])
+        candidate = _candidate(provider_names=["Disney Plus"])
+
+        assert _hard_filter(profile, [candidate]) == [candidate]
+
+    def test_excludes_a_movie_longer_than_the_runtime_ceiling(self):
+        profile = PreferenceProfile(media_type=MediaType.MOVIE, runtime_max_minutes=120)
+        candidates = [
+            _candidate(tmdb_id=1, runtime_minutes=100),
+            _candidate(tmdb_id=2, runtime_minutes=141),
+            _candidate(tmdb_id=3, runtime_minutes=None),
+        ]
+
+        assert [c.tmdb_id for c in _hard_filter(profile, candidates)] == [1, 3]
+
+    def test_a_relaxed_runtime_is_not_enforced(self):
+        profile = PreferenceProfile(media_type=MediaType.MOVIE, runtime_max_minutes=120)
+        long_movie = _candidate(runtime_minutes=141)
+
+        result = _hard_filter(profile, [long_movie], relaxed=RelaxableConstraint.RUNTIME)
+
+        assert result == [long_movie]
+
+    def test_tv_runtime_is_not_rechecked(self):
+        """TMDB's TV episode runtime is unreliable (empty for most shows)."""
+        profile = PreferenceProfile(media_type=MediaType.TV, runtime_max_minutes=30)
+        show = _candidate(media_type=MediaType.TV, runtime_minutes=60)
+
+        assert _hard_filter(profile, [show]) == [show]
 
 
 class TestSoftScore:

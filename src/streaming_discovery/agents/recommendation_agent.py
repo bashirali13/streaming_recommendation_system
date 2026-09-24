@@ -12,11 +12,17 @@ code, unit-testable without a model call (NFR-001).
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel
 
 from streaming_discovery.contracts.candidate_media import CandidateMedia
 from streaming_discovery.contracts.candidate_pool import CandidatePool
-from streaming_discovery.contracts.enums import MediaType, RecommendationRole
+from streaming_discovery.contracts.enums import (
+    MediaType,
+    RecommendationRole,
+    RelaxableConstraint,
+)
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.contracts.recommendation_package import (
     Recommendation,
@@ -101,12 +107,78 @@ def _mentions_excluded_keyword(profile: PreferenceProfile, candidate: CandidateM
     return any(term.lower() in haystack for term in profile.excluded_keywords)
 
 
+# TMDB's TV genres are a different, smaller list than its movie genres: a few
+# are combined, and Romance/Horror/Thriller/History/Music do not exist.
+_TV_GENRE_ALIASES = {
+    "science fiction": ("sci-fi & fantasy",),
+    "fantasy": ("sci-fi & fantasy",),
+    "action": ("action & adventure",),
+    "adventure": ("action & adventure",),
+    "war": ("war & politics",),
+}
+_GENRES_TV_LACKS = {"romance", "horror", "thriller", "history", "music"}
+
+
+def _carries_genre(candidate: CandidateMedia, genre: str) -> bool:
+    wanted = genre.lower()
+    have = {g.lower() for g in candidate.genres}
+    if wanted in have:
+        return True
+    if candidate.media_type is not MediaType.TV:
+        return False
+    if any(alias in have for alias in _TV_GENRE_ALIASES.get(wanted, ())):
+        return True
+    if wanted in _GENRES_TV_LACKS:
+        return any(wanted in keyword.lower() for keyword in candidate.thematic_keywords)
+    return False
+
+
+def _squash(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _on_requested_provider(candidate: CandidateMedia, providers: list[str]) -> bool:
+    for requested in map(_squash, providers):
+        for offered in map(_squash, candidate.provider_names):
+            if requested and offered and (requested in offered or offered in requested):
+                return True
+    return False
+
+
+def _breaks_a_stated_fact(
+    profile: PreferenceProfile, candidate: CandidateMedia, relaxed: RelaxableConstraint | None
+) -> bool:
+    if any(not _carries_genre(candidate, genre) for genre in profile.genres):
+        return True
+    year = candidate.release_year
+    if year is not None and relaxed is not RelaxableConstraint.YEAR_RANGE:
+        if profile.year_min is not None and year < profile.year_min:
+            return True
+        if profile.year_max is not None and year > profile.year_max:
+            return True
+    if profile.providers and not _on_requested_provider(candidate, profile.providers):
+        return True
+    return (
+        profile.runtime_max_minutes is not None
+        and relaxed is not RelaxableConstraint.RUNTIME
+        and candidate.media_type is MediaType.MOVIE
+        and candidate.runtime_minutes is not None
+        and candidate.runtime_minutes > profile.runtime_max_minutes
+    )
+
+
 def _hard_filter(
-    profile: PreferenceProfile, candidates: list[CandidateMedia]
+    profile: PreferenceProfile,
+    candidates: list[CandidateMedia],
+    relaxed: RelaxableConstraint | None = None,
 ) -> list[CandidateMedia]:
-    """Re-applies hard filters as a safety net (defense in depth) even
-    though the Discovery Agent already filtered -- the ranking-side half
-    of FR-009.
+    """Rechecks every candidate against the facts the user stated (the
+    ranking-side half of FR-009, T112): format, excluded genres and
+    keywords, and -- whichever discovery path produced the candidate --
+    requested genres, year range, streaming service and movie runtime.
+    TMDB's own filters can disagree with a title's details, and the
+    similar-titles path applies none at all. Only the constraint that was
+    explicitly relaxed (`relaxed`) is skipped.
     """
     result = []
     for candidate in candidates:
@@ -119,6 +191,8 @@ def _hard_filter(
         if set(candidate.genres) & set(profile.excluded_genres):
             continue
         if _mentions_excluded_keyword(profile, candidate):
+            continue
+        if _breaks_a_stated_fact(profile, candidate, relaxed):
             continue
         result.append(candidate)
     return result
@@ -307,7 +381,7 @@ class RecommendationAgent:
         self._max_additional_attempts = max_additional_attempts
 
     async def run(self, profile: PreferenceProfile, pool: CandidatePool) -> RecommendationPackage:
-        qualifying = _hard_filter(profile, pool.candidates)
+        qualifying = _hard_filter(profile, pool.candidates, pool.relaxed_constraint)
         qualifying = [c for c in qualifying if _meets_relevance_floor(profile, c)]
         ranked = _rank_candidates(profile, qualifying)
         selected = _deduplicate(ranked)[:3]

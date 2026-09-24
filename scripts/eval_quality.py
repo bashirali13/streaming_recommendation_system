@@ -27,8 +27,6 @@ from datetime import date
 from streaming_discovery.agents.recommendation_agent import RecommendationAgent, _RationaleOutput
 from streaming_discovery.cli.output import build_orchestrator
 from streaming_discovery.config import Settings
-from streaming_discovery.llm.provider import ModelCallError
-from streaming_discovery.tmdb.client import TmdbAdapterError
 
 Y = date.today().year
 
@@ -301,25 +299,38 @@ def _pick_problems(c, g: dict) -> list[str]:
     return bad
 
 
+async def _run_once(g: dict) -> dict:
+    o = build_orchestrator(Settings())
+    o._recommendation_agent = RecommendationAgent(
+        provider=_StubRationale(), max_additional_attempts=0
+    )
+    out = {"g": g, "error": None, "picks": [], "relaxed": None, "profile_bad": [], "note": None}
+    try:
+        pkg = await o.run_single_attempt(raw_user_input=g["p"])
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:100]}"
+        return out
+    profile = o.session.preference_profile
+    out["profile_bad"] = _profile_ok(profile, g) if profile else ["no profile"]
+    out["relaxed"] = pkg.relaxed_constraint.value if pkg.relaxed_constraint else None
+    out["note"] = pkg.unresolved_notes
+    for pick in (pkg.best_match, pkg.safe_pick, pkg.wildcard_pick):
+        if pick:
+            out["picks"].append((pick.candidate, _pick_problems(pick.candidate, g)))
+    return out
+
+
+def _transient(out: dict) -> bool:
+    """A dropped connection is not a quality result: try the prompt again."""
+    return bool(out["error"]) or "currently unavailable" in (out["note"] or "")
+
+
 async def _run_one(sem, g: dict) -> dict:
     async with sem:
-        o = build_orchestrator(Settings())
-        o._recommendation_agent = RecommendationAgent(
-            provider=_StubRationale(), max_additional_attempts=0
-        )
-        out = {"g": g, "error": None, "picks": [], "relaxed": None, "profile_bad": [], "note": None}
-        try:
-            pkg = await o.run_single_attempt(raw_user_input=g["p"])
-        except (TmdbAdapterError, ModelCallError, Exception) as exc:  # noqa: BLE001
-            out["error"] = f"{type(exc).__name__}: {str(exc)[:100]}"
-            return out
-        profile = o.session.preference_profile
-        out["profile_bad"] = _profile_ok(profile, g) if profile else ["no profile"]
-        out["relaxed"] = pkg.relaxed_constraint.value if pkg.relaxed_constraint else None
-        out["note"] = pkg.unresolved_notes
-        for pick in (pkg.best_match, pkg.safe_pick, pkg.wildcard_pick):
-            if pick:
-                out["picks"].append((pick.candidate, _pick_problems(pick.candidate, g)))
+        for _ in range(3):
+            out = await _run_once(g)
+            if not _transient(out):
+                break
         return out
 
 
@@ -352,7 +363,7 @@ async def main(core_only: bool, show: bool) -> None:
         if r["profile_bad"]:
             why.append("understood wrong: " + ", ".join(r["profile_bad"]))
         if not enough:
-            why.append(f"only {len(r['picks'])} picks")
+            why.append(f"only {len(r['picks'])} picks" + (f" ({r['note']})" if r["note"] else ""))
         if r["relaxed"]:
             why.append(f"relaxed {r['relaxed']}")
         if problems:

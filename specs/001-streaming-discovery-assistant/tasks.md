@@ -315,8 +315,10 @@ A user session ("Romance movie", Netflix/Hulu, after 1990) returned *Swapped*, *
 |---|---|---|---|---|
 | Baseline | 22/33 (66%) | 39/39 | 32/39 | 91/110 (82%) |
 | T111 mood words are never filters | 26/33 (78%) | 39/39 | 38/39 | 98/116 (84%) |
+| T112 recheck picks against stated facts | 29/33 (87%) | 39/39 | 33/39 | 101/101 (100%) |
 
 - [x] T111 Mood/tone words are no longer sent to TMDB as keyword filters (reverses T101); `RelaxableConstraint.TONE` is deleted, so no retry can drop a stated genre; keyword lookups now narrow first and widen when they leave fewer than 10 results (narrow matches stay at the front); the T106 company matching is removed (it sent "Gore" as an exclusion for a Serbian company called "Sve gore i gore"; the detail-level `production_companies` check already covers studios). Mostly deleted code. Tests rewritten first (`test_relaxation_policy.py`, keyword-ladder adapter tests), red then green.
+- [x] T112 The Recommendation Agent now rechecks every candidate against the facts the user stated -- requested genres, year range, streaming service, movie runtime -- skipping only a constraint the Orchestrator explicitly relaxed. TMDB's own filters can disagree with a title's details (an "under 2 hours" pick that was 141 minutes) and the similar-titles path applies none, so this is the one place every path passes through. TV candidates match a genre TV lacks (Romance, Horror, ...) through their keywords, and the combined TV genres (Sci-Fi & Fantasy, ...) through aliases. Picks satisfying the request went from 82% to 100%; the two similar-titles prompts now return nothing instead of wrong answers, which needs the pool fix (T115). Tests first, red then green.
 
 ---
 
