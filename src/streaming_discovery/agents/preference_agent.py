@@ -10,6 +10,9 @@ relaxes a constraint.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date
+
 from streaming_discovery.contracts.preference_profile import PreferenceProfile
 from streaming_discovery.llm.provider import ModelProvider, generate_with_retry
 
@@ -106,6 +109,25 @@ Rules:
 """
 
 
+def build_system_prompt(today: date) -> str:
+    """The static rules plus today's date (T110). The model has no clock:
+    left to guess, it resolved "the last 5 years" as `year_min: 2020` when
+    the real answer was 2021. Kept out of the user prompt so the exact-match
+    keys tests use for `FakeModelProvider` stay untouched.
+    """
+    return (
+        SYSTEM_PROMPT
+        + f"""
+Today's date is {today.isoformat()}. Resolve every relative time reference
+against it, never against a year you assume: "in the last 5 years" means
+year_min = {today.year - 5} (the current year minus 5), "recent" or "new"
+means roughly the last 3 years, "this year" means the current year, and a
+decade like "the 90s" means 1990 through 1999. Set year_max only when the
+user gives an upper bound.
+"""
+    )
+
+
 def build_preference_prompt(
     raw_user_input: str | None, intake_answers: dict[str, str | None]
 ) -> str:
@@ -124,9 +146,16 @@ def build_preference_prompt(
 
 
 class PreferenceAgent:
-    def __init__(self, *, provider: ModelProvider, max_additional_attempts: int) -> None:
+    def __init__(
+        self,
+        *,
+        provider: ModelProvider,
+        max_additional_attempts: int,
+        today: Callable[[], date] = date.today,
+    ) -> None:
         self._provider = provider
         self._max_additional_attempts = max_additional_attempts
+        self._today = today
 
     async def run(
         self, *, raw_user_input: str | None, intake_answers: dict[str, str | None]
@@ -134,7 +163,7 @@ class PreferenceAgent:
         user_prompt = build_preference_prompt(raw_user_input, intake_answers)
         return await generate_with_retry(
             self._provider,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(self._today()),
             user_prompt=user_prompt,
             output_type=PreferenceProfile,
             max_additional_attempts=self._max_additional_attempts,

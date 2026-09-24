@@ -208,16 +208,22 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
     from streaming_discovery.tmdb.client import build_real_tmdb_client
 
     real_tmdb_client: TmdbClient = build_real_tmdb_client(settings.tmdb_api_token)
-    model_provider: ModelProvider = _RealModelProvider(
+    preference_provider = _RealModelProvider(
+        model_name=settings.model_name,
+        api_key=settings.openrouter_api_key,
+        temperature=0.0,
+    )
+    recommendation_provider = _RealModelProvider(
         model_name=settings.model_name, api_key=settings.openrouter_api_key
     )
     return Orchestrator(
         preference_agent=PreferenceAgent(
-            provider=model_provider, max_additional_attempts=settings.llm_retry_max_attempts
+            provider=preference_provider, max_additional_attempts=settings.llm_retry_max_attempts
         ),
         discovery_agent=DiscoveryAgent(tmdb_client=real_tmdb_client),
         recommendation_agent=RecommendationAgent(
-            provider=model_provider, max_additional_attempts=settings.llm_retry_max_attempts
+            provider=recommendation_provider,
+            max_additional_attempts=settings.llm_retry_max_attempts,
         ),
         region=settings.region,
     )
@@ -241,9 +247,10 @@ class _RealModelProvider:
     free of any specific SDK/provider import.
     """
 
-    def __init__(self, *, model_name: str, api_key: str) -> None:
+    def __init__(self, *, model_name: str, api_key: str, temperature: float | None = None) -> None:
         self._model_name = model_name
         self._api_key = api_key
+        self._temperature = temperature
 
     async def generate(self, *, system_prompt: str, user_prompt: str, output_type):
         _suppress_pydantic_ai_banner()
@@ -257,7 +264,10 @@ class _RealModelProvider:
         )
         agent = Agent(model, output_type=output_type, system_prompt=system_prompt)
         try:
-            result = await agent.run(user_prompt)
+            model_settings = (
+                {"temperature": self._temperature} if self._temperature is not None else None
+            )
+            result = await agent.run(user_prompt, model_settings=model_settings)
         except Exception as exc:  # pydantic-ai's own transport/provider errors
             raise ModelCallError(f"Model call failed: {exc}") from exc
         return result.output
