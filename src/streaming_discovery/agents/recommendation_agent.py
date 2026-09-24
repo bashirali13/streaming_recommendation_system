@@ -172,8 +172,31 @@ def _theme_completeness_bonus(profile: PreferenceProfile, candidate: CandidateMe
     return 4.0 if _has_full_theme_match(profile, candidate) else 0.0
 
 
+_RATING_PRIOR_MEAN = 6.5
+"""Catalog-wide average TMDB rating a thinly-voted title is pulled toward."""
+
+_RATING_PRIOR_VOTES = 300
+"""How many votes a rating needs before it counts for as much as the
+prior -- an IMDb-style Bayesian weighting constant (T108)."""
+
+
+def _effective_rating(candidate: CandidateMedia) -> float:
+    """T108: `vote_average` shrunk toward the catalog mean in proportion
+    to how few votes back it. Confirmed live, raw `vote_average` let a
+    373-vote 9.16 outrank a 7,938-vote 8.64 and treated an unrated
+    title's 0.0 as "terrible" rather than "unknown". Unknown vote count
+    keeps the raw rating, so sources without a count are unaffected.
+    """
+    if candidate.vote_count is None:
+        return candidate.vote_average
+    votes = candidate.vote_count
+    return (votes * candidate.vote_average + _RATING_PRIOR_VOTES * _RATING_PRIOR_MEAN) / (
+        votes + _RATING_PRIOR_VOTES
+    )
+
+
 def _soft_score(profile: PreferenceProfile, candidate: CandidateMedia) -> float:
-    score = candidate.vote_average
+    score = _effective_rating(candidate)
     score += 2.0 * len(set(profile.genres) & set(candidate.genres))
     descriptor_hits = _descriptor_hit_count(profile, candidate)
     score += 1.5 * descriptor_hits

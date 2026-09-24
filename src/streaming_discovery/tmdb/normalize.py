@@ -145,6 +145,7 @@ def normalize_candidate(
         "genres": _genre_names(genre_ids, media_type),
         "release_year": _release_year(raw, media_type),
         "vote_average": raw.get("vote_average", 0.0),
+        "vote_count": raw.get("vote_count"),
     }
 
     if include_enrichment:

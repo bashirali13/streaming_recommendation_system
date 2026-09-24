@@ -252,7 +252,7 @@ This audit resolves the "review the TMDB fixture and justify every field" clarif
 |---|---|
 | `genre_ids` (raw TMDB ids) | Superseded by resolved `genres`; ids are translated once in the adapter and never need to travel downstream |
 | `popularity` | No requirement reads a "trending" signal distinct from `vote_average` |
-| `vote_count` | Would only matter for a rating-confidence weighting not specified by any current requirement |
+| ~~`vote_count`~~ | *Reinstated by T108* as `CandidateMedia.vote_count`: a rating-confidence weighting is now a real ranking need under FR-014 -- live testing showed a 9.16 rating from 373 votes outranking an 8.64 from 7,938 votes, and an unrated title's 0.0 being read as "terrible". Consumer: `RecommendationAgent._effective_rating` |
 | `language` (per-candidate) | The language filter is applied at query time from `PreferenceProfile.languages`; no requirement displays it back per candidate |
 | `poster_path`, `backdrop_path` | Terminal-only interface — no requirement renders an image |
 | `adult`, `video`, `original_title`, `belongs_to_collection`, `production_companies`, `budget`, `revenue`, `homepage`, `imdb_id`, `tagline`, `status` | No consumer in any stated requirement |

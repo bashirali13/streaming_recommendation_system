@@ -72,6 +72,7 @@ Produced by the Discovery Agent from normalized TMDB data (FR-008); consumed by 
 | `genres` | `list[str]` | Resolved names only — never raw TMDB genre ids |
 | `release_year` | `int \| None` | Year only, not a full date |
 | `vote_average` | `float` | Ranking signal, near-duplicate tie-break |
+| `vote_count` | `int \| None` | Confidence weight for `vote_average` (T108, FR-014): ranking uses a Bayesian-weighted rating (`_effective_rating`) that shrinks a thinly-voted score toward the catalog mean, so a 9.16 from 373 votes no longer outranks an 8.64 from 7,938. Present on TMDB's bulk list items, so not enrichment-gated. `None` = source didn't say, and the raw rating is used |
 | `runtime_minutes` | `int \| None` | **Enrichment field** for display/ranking; populated for ranking-stage candidates per FR-029. When runtime is a *hard* TV constraint, this same detail data is fetched earlier, over the raw pool, purely to filter — see the Discovery Agent contract's hard-filter note |
 | `season_count` | `int \| None` | TV-only. Same treatment as `runtime_minutes`: a display/ranking enrichment field normally, but fetched over the raw pool for hard filtering when `season_count_max` is a stated hard constraint (User Story 5) |
 | `provider_names` | `list[str]` | **Enrichment field** — flatrate-only, configured region only (FR-019); populated only for candidates reaching ranking |

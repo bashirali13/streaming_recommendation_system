@@ -7,7 +7,7 @@ consumed by the Recommendation Agent and, for the three selected roles, by
 the final output. The field list is intentionally minimal -- every field
 has a named consumer and requirement; see spec.md's Domain Model
 Minimization Rationale for what was deliberately excluded (raw genre ids,
-popularity, vote_count, per-candidate language, poster/backdrop paths, and
+popularity, per-candidate language, poster/backdrop paths, and
 others). Do not add a field here without a consumer and a requirement.
 """
 
@@ -26,6 +26,11 @@ class CandidateMedia(BaseModel):
     genres: list[str] = Field(default_factory=list)
     release_year: int | None = None
     vote_average: float
+    vote_count: int | None = None
+    """How many votes back `vote_average` (T108). Consumer:
+    `RecommendationAgent`'s rating-confidence weighting (FR-014) -- a
+    9.16 from 373 votes must not outrank an 8.64 from 7,938. None means
+    the source didn't say, in which case the raw rating is used as-is."""
     runtime_minutes: int | None = None
     """Enrichment field: populated only for candidates reaching ranking
     (FR-029), except when runtime is a hard TV constraint, in which case

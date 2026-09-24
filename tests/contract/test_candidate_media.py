@@ -59,7 +59,6 @@ class TestCandidateMediaHasNoTmdbMirroredFields:
         excluded_field_names = {
             "genre_ids",
             "popularity",
-            "vote_count",
             "language",
             "poster_path",
             "backdrop_path",

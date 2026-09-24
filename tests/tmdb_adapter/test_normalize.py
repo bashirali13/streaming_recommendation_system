@@ -67,7 +67,6 @@ _RAW_SEQUEL_DETAILS = {
 _EXCLUDED_FIELD_NAMES = {
     "genre_ids",
     "popularity",
-    "vote_count",
     "language",
     "poster_path",
     "backdrop_path",
@@ -94,6 +93,24 @@ def test_normalize_bulk_item_has_no_tmdb_mirrored_fields():
     assert candidate.genres == ["Drama", "Thriller"]
     assert candidate.release_year == 1999
     assert not (_EXCLUDED_FIELD_NAMES & set(type(candidate).model_fields.keys()))
+
+
+@pytest.mark.tmdb_adapter
+def test_normalize_carries_vote_count_from_the_bulk_item():
+    """T108: needed for rating-confidence weighting (FR-014); present on
+    TMDB's bulk list items, so it is not enrichment-gated."""
+    candidate = normalize_candidate(_RAW_MOVIE_LIST_ITEM, media_type=MediaType.MOVIE, region="US")
+
+    assert candidate.vote_count == 26280
+
+
+@pytest.mark.tmdb_adapter
+def test_normalize_leaves_vote_count_unknown_when_the_source_omits_it():
+    raw = {k: v for k, v in _RAW_MOVIE_LIST_ITEM.items() if k != "vote_count"}
+
+    candidate = normalize_candidate(raw, media_type=MediaType.MOVIE, region="US")
+
+    assert candidate.vote_count is None
 
 
 @pytest.mark.tmdb_adapter

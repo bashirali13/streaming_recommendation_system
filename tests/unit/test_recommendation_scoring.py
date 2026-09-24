@@ -7,6 +7,7 @@ e2e tests, so it's tested directly here too.
 
 from streaming_discovery.agents.recommendation_agent import (
     _deduplicate,
+    _effective_rating,
     _hard_filter,
     _has_weak_tone_evidence,
     _rank_candidates,
@@ -123,6 +124,42 @@ class TestSoftScore:
         assert _soft_score(profile, similar_to_disliked) < _soft_score(profile, unrelated)
 
 
+class TestEffectiveRating:
+    """T108: raw TMDB `vote_average` is unreliable at low vote counts --
+    confirmed live, an animated Batman film with 373 votes (9.16) was
+    ranked above "Project Hail Mary" with 7,938 votes (8.64), because
+    nothing weighed how much evidence backed each rating. A Bayesian
+    (IMDb-style) weighted rating shrinks a thinly-evidenced score toward
+    the catalog-wide mean.
+    """
+
+    def test_a_thinly_voted_high_rating_is_pulled_below_a_well_established_one(self):
+        thin = _candidate(tmdb_id=1, title="Thin", vote_average=9.16, vote_count=373)
+        established = _candidate(
+            tmdb_id=2, title="Established", vote_average=8.639, vote_count=7938
+        )
+
+        assert _effective_rating(established) > _effective_rating(thin)
+
+    def test_with_overwhelming_votes_the_rating_is_essentially_unchanged(self):
+        candidate = _candidate(vote_average=8.2, vote_count=1_000_000)
+
+        assert abs(_effective_rating(candidate) - 8.2) < 0.01
+
+    def test_with_no_votes_the_rating_falls_back_to_the_catalog_mean_not_zero(self):
+        """A brand-new title's 0.0 means "nobody has rated it", not "it is
+        terrible" -- it must not be treated as the worst possible score."""
+        candidate = _candidate(vote_average=0.0, vote_count=0)
+
+        assert 5.0 < _effective_rating(candidate) < 8.0
+
+    def test_unknown_vote_count_uses_the_raw_rating(self):
+        """Fixture/demo data and any source without a count keep working."""
+        candidate = _candidate(vote_average=7.9)
+
+        assert _effective_rating(candidate) == 7.9
+
+
 class TestRankCandidates:
     def test_full_theme_match_always_outranks_a_more_popular_partial_match(self):
         """T103: T102's flat +4.0 `_soft_score` bonus for full theme
@@ -164,6 +201,27 @@ class TestRankCandidates:
         ranked = _rank_candidates(profile, [lower, higher])
 
         assert ranked[0].title == "Higher"
+
+    def test_a_well_established_title_outranks_a_thinly_voted_higher_rating(self):
+        profile = PreferenceProfile(genres=["Science Fiction"])
+        thin = _candidate(
+            tmdb_id=1,
+            title="Knightfall",
+            genres=["Science Fiction"],
+            vote_average=9.16,
+            vote_count=373,
+        )
+        established = _candidate(
+            tmdb_id=2,
+            title="Project Hail Mary",
+            genres=["Science Fiction"],
+            vote_average=8.639,
+            vote_count=7938,
+        )
+
+        ranked = _rank_candidates(profile, [thin, established])
+
+        assert ranked[0].title == "Project Hail Mary"
 
 
 class TestWeakToneEvidence:
